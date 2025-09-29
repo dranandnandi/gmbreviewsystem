@@ -114,6 +114,16 @@ export interface Review {
   hasSequence: boolean;
   aiReviewText?: string;
   aiReviewFirstMessageSent?: boolean;
+  language?: string; // ISO code, default 'en'
+  localizedMessageBundle?: {
+    language: string;
+    flow: 'ai3' | 'simple1';
+    messages: string[];
+    model?: string;
+    terms_kept?: string[];
+    created_at?: string;
+  } | null;
+  localizedMessageBundleStatus?: 'prepared' | 'consumed';
   createdAt: string;
 }
 
@@ -179,4 +189,6 @@ export interface Store {
   updateReportRequest: (id: string, updates: Partial<ReportRequest>) => Promise<void>;
   sendMessagesToSheet: (messages: SequenceMessage[]) => Promise<void>;
   queueReviewMessageForSheet: (review: Review, messageType: 'ai_first' | 'ai_second' | 'simple_thank_you' | 'gmb_link') => Promise<SequenceMessage>;
+  prepareLocalizedReviewBundle: (review: Review, language: string, flow: 'ai3' | 'simple1') => Promise<void>;
+  markLocalizedBundleConsumed: (reviewId: string) => Promise<void>;
 }

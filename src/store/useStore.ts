@@ -87,6 +87,9 @@ interface Store {
   fetchReportRequests: () => Promise<void>;
   updateReportRequest: (id: string, updates: Partial<ReportRequest>) => Promise<void>;
   sendMessagesToSheet: (messages: SequenceMessage[]) => Promise<void>;
+  // Localized bundles
+  prepareLocalizedReviewBundle: (review: Review, language: string, flow: 'ai3' | 'simple1') => Promise<void>;
+  markLocalizedBundleConsumed: (reviewId: string) => Promise<void>;
   
   // Message editing
   updateSequenceMessageContent: (messageId: string, newContent: string) => Promise<void>;
@@ -450,6 +453,9 @@ export const useStore = create<Store>()(
                 has_sequence,
                 ai_review_text,
                 ai_review_first_message_sent,
+                language,
+                localized_message_bundle,
+                localized_message_bundle_status,
                 created_at
               `)
               .eq('user_id', user.id)
@@ -473,6 +479,9 @@ export const useStore = create<Store>()(
             hasSequence: review.has_sequence || false,
             aiReviewText: review.ai_review_text,
             aiReviewFirstMessageSent: review.ai_review_first_message_sent || false,
+            language: review.language || 'en',
+            localizedMessageBundle: review.localized_message_bundle || null,
+            localizedMessageBundleStatus: review.localized_message_bundle_status || undefined,
             createdAt: review.created_at
           })).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
           
@@ -1308,6 +1317,87 @@ export const useStore = create<Store>()(
           }));
         } catch (error) {
           console.error('Error updating sequence message content:', error);
+          throw error;
+        }
+      },
+
+      // Prepare a localized (non-English) message bundle via edge function and persist it on the review
+  prepareLocalizedReviewBundle: async (review: Review, language: string, flow: 'ai3' | 'simple1') => {
+        const { user } = get();
+        if (!user?.id) throw new Error('User not authenticated');
+        try {
+          const body = {
+            language,
+            flow,
+            context: {
+              patientName: review.patientName,
+              clinicName: user.clinicName || '',
+              clinicAddress: user.clinicAddress || '',
+              gmbLink: user.gmbLink || '',
+              date: new Date(review.appointmentDate).toLocaleDateString(),
+              treatment: review.treatment || undefined,
+              notes: review.notes || undefined,
+              termsToKeep: [user.clinicName || '', 'MRI', 'CBC', 'X-ray', 'CT', 'ECG'].filter(Boolean)
+            }
+          };
+          const { data, error } = await executeWithRetry(() =>
+            supabase.functions.invoke('generate-review-bundle', { body })
+          );
+          if (error) throw error;
+
+          // Persist on reviews
+          const { error: upErr } = await executeWithRetry(() =>
+            supabase
+              .from('reviews')
+              .update({
+                language,
+                localized_message_bundle: data,
+                localized_message_bundle_status: 'prepared',
+                ai_review_text: flow === 'ai3' && Array.isArray((data as any)?.messages) && (data as any).messages[1]
+                  ? (data as any).messages[1]
+                  : (review.aiReviewText || null),
+                has_sequence: flow === 'ai3'
+              })
+              .eq('id', review.id)
+              .select()
+          );
+          if (upErr) throw upErr;
+
+          // Update local state
+          set((state) => ({
+            reviews: state.reviews.map(r => r.id === review.id ? {
+              ...r,
+              language,
+              localizedMessageBundle: data as any,
+              localizedMessageBundleStatus: 'prepared',
+              aiReviewText: flow === 'ai3' && Array.isArray((data as any)?.messages) && (data as any).messages[1]
+                ? (data as any).messages[1]
+                : r.aiReviewText,
+              hasSequence: flow === 'ai3'
+            } : r)
+          }));
+        } catch (error) {
+          console.error('Error preparing localized bundle:', error);
+          throw error;
+        }
+      },
+
+      // Mark the localized bundle as consumed after sending
+      markLocalizedBundleConsumed: async (reviewId: string) => {
+        try {
+          const { error } = await executeWithRetry(() =>
+            supabase
+              .from('reviews')
+              .update({ localized_message_bundle_status: 'consumed' })
+              .eq('id', reviewId)
+              .select()
+          );
+          if (error) throw error;
+          set((state) => ({
+            reviews: state.reviews.map(r => r.id === reviewId ? { ...r, localizedMessageBundleStatus: 'consumed' } : r)
+          }));
+        } catch (error) {
+          console.error('Error marking bundle consumed:', error);
           throw error;
         }
       },
