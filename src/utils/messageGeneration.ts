@@ -25,13 +25,14 @@ export async function generateReviewMessageContent({
 
   switch (messageType) {
     case 'ai_first': {
-      // Find the AI integrated template
+      // Find the AI integrated template (first message)
       const template = reviewRequestTemplates.find(t => t.templateType === 'ai_integrated');
       if (!template) {
         throw new Error('AI review template not found. Please contact support.');
       }
 
-      // Generate AI review if not already available
+      // Note: Do NOT include AI review text or GMB link in the first message anymore.
+      // We still proactively generate and persist the AI review text if missing, so the next step is fast.
       aiReviewText = review.aiReviewText;
       if (!aiReviewText) {
         aiReviewText = await generateAIReview({
@@ -40,7 +41,6 @@ export async function generateReviewMessageContent({
           treatment: review.treatment || 'consultation',
           date: new Date(review.appointmentDate).toLocaleDateString(),
         });
-        // Persist immediately so subsequent calls skip generation
         try {
           await supabase
             .from('reviews')
@@ -51,15 +51,13 @@ export async function generateReviewMessageContent({
         }
       }
 
-      // Replace placeholders in the template
+      // Replace placeholders in the template (no {ai_review_text} and no {gmb_link})
       messageContent = template.messageTemplate
         .replace(/{patient_name}/g, review.patientName)
         .replace(/{clinic_name}/g, user.clinicName || '')
         .replace(/{clinic_address}/g, user.clinicAddress || '')
-        .replace(/{gmb_link}/g, user.gmbLink || '')
         .replace(/{contact_phone}/g, user.contactPhone || '')
-        .replace(/{visit_date}/g, new Date(review.appointmentDate).toLocaleDateString())
-        .replace(/{ai_review_text}/g, aiReviewText || '');
+        .replace(/{visit_date}/g, new Date(review.appointmentDate).toLocaleDateString());
       
       break;
     }

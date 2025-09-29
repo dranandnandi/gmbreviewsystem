@@ -12,11 +12,9 @@ Your visit details:
 🏥 Name of Center: {clinic_name}
 📍 Location: {clinic_address}
 
-Here's a suggested review based on your visit:
+You will receive a sample review in the next message and which you can change or modify.
 
-{ai_review_text}
 
-You can submit your review here: {gmb_link}
 
 Best regards,
 Team {clinic_name}
