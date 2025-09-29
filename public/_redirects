@@ -1,0 +1,11 @@
+# Netlify redirects file for single-page application (SPA) routing
+# This file tells Netlify to serve index.html for all routes so React Router can handle client-side routing
+
+# Handle all routes with index.html (200 status means serve the file without redirect)
+/*    /index.html   200
+
+# Optional: Redirect any www subdomain to non-www (uncomment if needed)
+# https://www.yourdomain.com/*  https://yourdomain.com/:splat  301!
+
+# Optional: Force HTTPS (uncomment if needed)
+# http://yourdomain.com/*  https://yourdomain.com/:splat  301!

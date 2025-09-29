@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  input[type="text"],
+  input[type="tel"],
+  input[type="date"],
+  input[type="time"],
+  input[type="url"],
+  input[type="number"],
+  input[type="password"],
+  select,
+  textarea {
+    @apply border-gray-300 focus:border-indigo-500 focus:ring-indigo-500;
+  }
+}
+
+/* Reviews / table layout fixes */
+.reviews-table {
+  width: 100%;
+  table-layout: fixed; /* Prevent columns from expanding based on long content */
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.reviews-table th,
+.reviews-table td {
+  padding: 12px 16px;
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis; /* Show ellipsis for truncated single-line cells */
+  white-space: nowrap; /* Default: keep to one line unless overridden with .wrap */
+}
+
+/* Cells that should wrap normally instead of expanding the column */
+.reviews-table td.wrap {
+  white-space: normal;            /* Allow wrapping */
+  overflow-wrap: anywhere;        /* Break long words/URLs */
+  word-break: break-word;         /* Legacy support */
+  text-overflow: clip;            /* Remove ellipsis so full wrapped text shows */
+}
+
+/* Optional utility if you want a max height with scroll for very long content */
+.reviews-table td.wrap.max-h-3lines {
+  display: -webkit-box;
+  line-clamp: 3; /* Standard property */
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
