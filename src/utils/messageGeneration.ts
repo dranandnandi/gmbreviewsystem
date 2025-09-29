@@ -82,14 +82,8 @@ export async function generateReviewMessageContent({
         }
       }
 
-      messageContent = `Here's your personalized review suggestion:
-
-${aiReviewText}
-
-Feel free to modify this review as needed before posting it on Google My Business.
-
-Best regards,
-Team ${user.clinicName || 'our clinic'}`;
+      // Only send the AI-generated review text itself
+      messageContent = (aiReviewText || '').trim();
       break;
     }
     
