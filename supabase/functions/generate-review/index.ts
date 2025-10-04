@@ -1,3 +1,6 @@
+export {};
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+declare const Deno: any;
 // supabase/functions/generate-review/index.ts
 // Generates a short human-style patient review via Gemini.
 // Deploy with: supabase functions deploy generate-review --no-verify-jwt
@@ -5,7 +8,7 @@
 //
 // Secret required:
 //   supabase secrets set ALLGOOGLE_KEY="YOUR_GOOGLE_API_KEY"
-const MODEL = 'gemini-2.5-flash'; // <-- use a valid model id
+const MODEL = 'gemini-2.0-flash-lite'; // <-- use a valid model id
 const GOOGLE_API_KEY = Deno.env.get('ALLGOOGLE_KEY');
 const QUALITIES = [
   'friendly staff',
@@ -34,10 +37,10 @@ function pickQualities(n = 2) {
     ...QUALITIES
   ].sort(()=>Math.random() - 0.5).slice(0, n);
 }
-function sanitize(str) {
+function sanitize(str: string) {
   return str.replace(/[`"'<>]/g, '').trim();
 }
-Deno.serve(async (req)=>{
+Deno.serve(async (req: Request)=>{
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, {
@@ -194,8 +197,8 @@ Return ONLY the plain review text (no JSON, no quotes, no backticks).
         }
       });
     }
-    const json = await aiResp.json();
-    const raw = json?.candidates?.[0]?.content?.parts?.map((p)=>p.text).join(' ').trim() || json?.candidates?.[0]?.output_text || '';
+  const json = await aiResp.json();
+  const raw = json?.candidates?.[0]?.content?.parts?.map((p: any)=>p.text).join(' ').trim() || json?.candidates?.[0]?.output_text || '';
     if (!raw) {
       return new Response(JSON.stringify({
         error: 'Empty model response'

@@ -1,10 +1,7 @@
+export {};
 // supabase/functions/generate-review-bundle/index.ts
-// Returns 1 or 3 localized WhatsApp-friendly messages for a review flow.
-// Deploy with: supabase functions deploy generate-review-bundle --no-verify-jwt
-// Secrets: ALLGOOGLE_KEY must be set (same as generate-review) if using Gemini.
+// Strict, no-fallback version that enforces exact WhatsApp-friendly format and Gunglish terms.
 
-// Allow TypeScript in VS Code to recognize the Deno globals in this file
-// without requiring Deno type libs in the project.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare const Deno: any;
 
@@ -19,223 +16,363 @@ function corsHeaders() {
 
 type Flow = 'ai3' | 'simple1';
 
-interface BundleRequest {
-  language: string; // e.g., 'hi', 'gu', 'mr', 'ta'
-  flow: Flow;
-  context: {
-    patientName: string;
-    clinicName: string;
-    clinicAddress?: string;
-    gmbLink?: string;
-    date: string; // human-readable
-    treatment?: string;
-    notes?: string;
-    termsToKeep?: string[]; // technical/proper nouns to keep in English
-  };
-}
+const GOOGLE_API_KEY =
+  (typeof Deno !== 'undefined' && Deno?.env?.get) ? Deno.env.get('ALLGOOGLE_KEY') : undefined;
 
-interface BundleResponse {
-  language: string;
-  flow: Flow;
-  messages: string[]; // 1 or 3 messages
-  model?: string;
-  terms_kept?: string[];
-  created_at: string;
-}
-
-const MODEL = 'gemini-2.0-flash-lite';
-const GOOGLE_API_KEY = (typeof Deno !== 'undefined' && Deno?.env?.get) ? Deno.env.get('ALLGOOGLE_KEY') : undefined;
+// Use one model (you can switch to -pro if you prefer)
+const FIXED_MODEL = 'gemini-2.5-flash';
+const GEN_MODELS = [FIXED_MODEL];
+const TX_MODELS  = [FIXED_MODEL];
 
 const LANGUAGE_NAMES: Record<string, string> = {
-  en: 'English', hi: 'Hindi', gu: 'Gujarati', mr: 'Marathi', bn: 'Bengali', ta: 'Tamil', te: 'Telugu', kn: 'Kannada', ml: 'Malayalam', pa: 'Punjabi', ur: 'Urdu'
+  en: 'English', hi: 'Hindi', gu: 'Gujarati', mr: 'Marathi', bn: 'Bengali',
+  ta: 'Tamil', te: 'Telugu', kn: 'Kannada', ml: 'Malayalam', pa: 'Punjabi', ur: 'Urdu'
 };
 
-// Expected script ranges to validate output roughly matches target language
+/**
+ * 1) Global English words you want to always keep in English (Latin) across ALL languages.
+ * 2) Optional per-language additions for tone.
+ * Edit these lists to tune your “Gunglish/Hinglish/etc.” flavor.
+ */
+const COMMON_LATIN_GLOBAL: string[] = [
+  'review','reviews','rating','feedback','experience','service','services',
+  'staff','team','support','clinic','lab','report','results','process',
+  'clean','organized','professional','friendly','Google','Link','WhatsApp',
+  'thank you','Best regards','Doctor','Dr','nurse','test','tests','appointment',
+  'quick','helpful','recommend','diabetes','pathology'
+];
+
+const COMMON_LATIN_BY_LANG: Record<string, string[]> = {
+  gu: ['review','rating','feedback','experience','service','services','staff','team','clinic','lab','report','results','process','clean','organized','professional','friendly','Google','Link','WhatsApp','recommend'],
+  hi: ['review','rating','feedback','experience','service','services','staff','team','clinic','lab','report','results','process','clean','organized','professional','friendly','Google','Link','WhatsApp','recommend'],
+  bn: ['review','rating','feedback','experience','service','services','staff','team','clinic','lab','report','results','process','clean','organized','professional','friendly','Google','Link','WhatsApp','recommend']
+};
+
+function mergedLatinWhitelist(lang: string, termsToKeep: string[] = []): string[] {
+  const base = COMMON_LATIN_GLOBAL;
+  const perLang = COMMON_LATIN_BY_LANG[lang] || [];
+  // Caller terms first (highest priority), then per-language, then global.
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const t of [...termsToKeep, ...perLang, ...base]) {
+    const s = String(t).trim();
+    if (!s || seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
+  return out;
+}
+
+// ---------- script detection ----------
 function scriptRegexFor(lang: string): RegExp | null {
   switch (lang) {
-    case 'hi': // Devanagari
-    case 'mr':
-      return /[\u0900-\u097F]/;
-    case 'gu': // Gujarati
-      return /[\u0A80-\u0AFF]/;
-    case 'pa': // Gurmukhi
-      return /[\u0A00-\u0A7F]/;
-    case 'bn': // Bengali
-      return /[\u0980-\u09FF]/;
-    case 'ta': // Tamil
-      return /[\u0B80-\u0BFF]/;
-    case 'te': // Telugu
-      return /[\u0C00-\u0C7F]/;
-    case 'kn': // Kannada
-      return /[\u0C80-\u0CFF]/;
-    case 'ml': // Malayalam
-      return /[\u0D00-\u0D7F]/;
-    case 'ur': // Arabic script (Urdu)
-      return /[\u0600-\u06FF]/;
-    default:
-      return null;
+    case 'hi':
+    case 'mr': return /[\u0900-\u097F]/; // Devanagari
+    case 'gu': return /[\u0A80-\u0AFF]/; // Gujarati
+    case 'pa': return /[\u0A00-\u0A7F]/; // Gurmukhi
+    case 'bn': return /[\u0980-\u09FF]/; // Bengali
+    case 'ta': return /[\u0B80-\u0BFF]/; // Tamil
+    case 'te': return /[\u0C00-\u0C7F]/; // Telugu
+    case 'kn': return /[\u0C80-\u0CFF]/; // Kannada
+    case 'ml': return /[\u0D00-\u0D7F]/; // Malayalam
+    case 'ur': return /[\u0600-\u06FF]/; // Arabic (Urdu)
+    default:   return null;
   }
 }
-
+const MIN_CHARS = 6;
 function messagesMatchTargetLanguage(messages: string[], lang: string): boolean {
-  if (!messages?.length) return false;
   const re = scriptRegexFor(lang);
-  if (!re) {
-    // If we don't have a script validator (e.g., en), accept
-    return lang === 'en';
+  if (!re) return lang === 'en';
+  const joined = messages.join(' ');
+  let count = 0;
+  for (const ch of joined) {
+    if (re.test(ch)) count++;
+    if (count >= MIN_CHARS) return true;
   }
-  // Consider valid if at least one target-script character appears in any message
-  return messages.some(m => re.test(m));
+  return false;
 }
 
-async function translateArrayToLanguage(original: string[], lang: string, termsToKeep: string[]): Promise<string[] | null> {
-  const targetName = LANGUAGE_NAMES[lang] || 'English';
-  const keep = termsToKeep.filter(Boolean).join(', ');
-  const obj = { messages: original };
-  const prompt = `Translate the JSON object's messages array into ${targetName} (language code: ${lang}) using native script.
-Rules:
-- Preserve the following terms exactly in English (Latin script): ${keep || '(none)'}
-- Do not change the number of messages or their order.
-- Return ONLY the JSON object with a messages array. No extra text.
-JSON INPUT:\n${JSON.stringify(obj)}`;
+// ---------- JSON helpers ----------
+function safeParseJsonMessages(text: string): string[] | null {
   try {
-    const text = await generateWithGemini(prompt);
-    const parsed = safeParseJsonArray(text);
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-async function generateWithGemini(prompt: string): Promise<string> {
-  if (!GOOGLE_API_KEY) throw new Error('Missing ALLGOOGLE_KEY secret');
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(MODEL)}:generateContent?key=${GOOGLE_API_KEY}`;
-  const body = {
-    contents: [
-      { role: 'user', parts: [{ text: prompt }] }
-    ]
-  };
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-  if (!resp.ok) {
-    let detail = '';
-    try { detail = await resp.text(); } catch { /* ignore */ }
-    throw new Error(`Gemini error ${resp.status}: ${detail}`);
-  }
-  const json = await resp.json();
-  // Extract text from candidates
-  const text = json?.candidates?.[0]?.content?.parts?.[0]?.text || json?.candidates?.[0]?.content?.parts?.[0]?.inline_data?.data || '';
-  return String(text).trim();
-}
-
-function buildPrompt(input: BundleRequest): string {
-  const langCode = (input.language || 'en').toLowerCase();
-  const targetName = LANGUAGE_NAMES[langCode] || 'English';
-  const keepTerms = (input.context.termsToKeep || []).filter(Boolean).join(', ');
-
-  const base = `You are a helpful assistant generating WhatsApp-friendly patient review messages in ${targetName} (language code: ${langCode}).
-RULES:
-- Write the output strictly in ${targetName} (native script) except the following proper nouns/technical terms which must remain in English (Latin script) exactly as provided: ${keepTerms || '(none)'}.
-- Keep content concise, friendly, and professional.
-- Do not include any markdown, code fences, or explanations.
-- Return ONLY a valid JSON object per the schema below. No extra text.
-
-INPUT CONTEXT (use to personalize):
-- Patient Name: ${input.context.patientName}
-- Clinic Name: ${input.context.clinicName}
-- Clinic Address: ${input.context.clinicAddress || ''}
-- Visit Date: ${input.context.date}
-- Treatment: ${input.context.treatment || ''}
-- Notes: ${input.context.notes || ''}
-- Google Review Link: ${input.context.gmbLink || ''}
-
-OUTPUT SCHEMA:
-{
-  "messages": string[]
-}
-
-REQUIREMENTS BY FLOW:
-1) If flow = ai3, produce exactly 3 messages:
-   - messages[0]: Thank-you message WITHOUT the review link; include visit details and a line like "You will receive a sample review in the next message which you can modify." in ${targetName}.
-   - messages[1]: ONLY the sample review text itself (no greeting, no footer, no link) in ${targetName}.
-   - messages[2]: Short message including ONLY the Google review link localized appropriately.
-
-2) If flow = simple1, produce exactly 1 message:
-   - messages[0]: Thank-you message WITH the Google review link, in ${targetName}.
-
-IMPORTANT:
-- Never translate or transliterate the terms to keep.
-- Be sure the language of the messages is ${targetName}.
-- Return only the JSON object.`;
-
-  return base;
-}
-
-function safeParseJsonArray(text: string): string[] | null {
-  try {
-    // Some models return JSON object or array; we expect object with messages array, but try both
-    const cleaned = text.replace(/^```(json)?/g, '').replace(/```$/g, '').trim();
+    const cleaned = String(text).trim()
+      .replace(/^```(?:json)?/i, '')
+      .replace(/```$/, '')
+      .trim();
     const parsed = JSON.parse(cleaned);
     if (Array.isArray(parsed)) return parsed as string[];
-    if (parsed && Array.isArray(parsed.messages)) return parsed.messages as string[];
-  } catch { /* ignore */ }
+    if (parsed && Array.isArray((parsed as any).messages)) return (parsed as any).messages as string[];
+  } catch {}
   return null;
 }
 
+// ---------- Gemini call (JSON only) ----------
+async function callGeminiJSON(
+  modelCandidates: string[],
+  userParts: { text: string }[],
+  systemText?: string
+): Promise<{ text: string; modelUsed: string }> {
+  if (!GOOGLE_API_KEY) throw new Error('Missing ALLGOOGLE_KEY secret');
+
+  let lastErr: string | null = null;
+  for (const model of modelCandidates) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${GOOGLE_API_KEY}`;
+      const body: any = {
+        contents: [{ role: 'user', parts: userParts }],
+        generationConfig: {
+          response_mime_type: 'application/json',
+          temperature: 0.1, // keep it deterministic
+          topK: 40,
+          topP: 0.9
+        }
+      };
+      if (systemText) {
+        body.systemInstruction = { role: 'system', parts: [{ text: systemText }] };
+      }
+      const resp = await fetch(url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+      });
+      if (!resp.ok) {
+        let detail = ''; try { detail = await resp.text(); } catch {}
+        lastErr = `Gemini error ${resp.status} for ${model}: ${detail}`;
+        continue;
+      }
+      const json = await resp.json();
+      const text =
+        json?.candidates?.[0]?.content?.parts?.[0]?.text ??
+        json?.candidates?.[0]?.content?.parts?.[0]?.inline_data?.data ?? '';
+      if (text && String(text).trim().length > 0) {
+        return { text: String(text).trim(), modelUsed: model };
+      }
+      lastErr = `Empty content for ${model}`;
+    } catch (e: any) {
+      lastErr = `Request failed for ${model}: ${e?.message || e}`;
+    }
+  }
+  throw new Error(lastErr || 'All model candidates failed');
+}
+
+// ---------- prompts (Exact format + Gunglish) ----------
+/**
+ * EXACT FORMAT you asked for (message[0]):
+ *
+ * Hello {patientName},
+ *
+ * We hope you had a satisfying experience with the services at {clinicName}. Your feedback is highly valuable to us.
+ *
+ * Your visit details:
+ * 📅 Date: {date}
+ * 🏥 Name of Center: {clinicName}
+ * 📍 Location: {clinicAddress}
+ *
+ * You will receive a sample review in the next message and which you can change or modify.
+ *
+ * Best regards,
+ * Team {clinicName}
+ *
+ * message[1]: plain sample review line(s) ONLY (no greeting/footer/link)
+ * message[2]: ONLY the Google review link (no extra words)
+ */
+
+function buildSystemInstruction(langCode: string, termsToKeep: string[], clinicName?: string): string {
+  const targetName = LANGUAGE_NAMES[langCode] || 'English';
+  const keepList = mergedLatinWhitelist(langCode, termsToKeep);
+  const keep = keepList.length ? keepList.join(', ') : '(none)';
+
+  return [
+    `ROLE: You are a localization engine.`,
+    `STYLE: Write sentences primarily in ${targetName} (${langCode}) native script,`,
+    `but keep the following words/phrases in ENGLISH (Latin) exactly as-is to achieve a natural mixed style: ${keep}`,
+    `ALLOWED English letters ONLY for:`,
+    `- The protected Latin words above,`,
+    `- URLs, emoji, and numbers.`,
+    `Do NOT add timestamps, sender names, or message prefixes.`,
+    `Output ONLY valid JSON per instructions. No comments/explanations.`
+  ].join('\n');
+}
+
+function buildGenUserPrompt(input: any): string {
+  const langCode = (input.language || 'en').toLowerCase();
+  const targetName = LANGUAGE_NAMES[langCode] || 'English';
+  const keepList = mergedLatinWhitelist(langCode, input.context?.termsToKeep || []);
+  const keepTerms = keepList.join(', ') || '(none)';
+
+  const p = input.context || {};
+  const patientName = p.patientName || '';
+  const clinicName = p.clinicName || '';
+  const clinicAddress = p.clinicAddress || '';
+  const date = p.date || '';
+  const gmbLink = p.gmbLink || '';
+
+  return `TASK: Generate WhatsApp-friendly patient review messages in a MIXED style:
+- Sentences in ${targetName} (${langCode}) native script.
+- Keep the following in ENGLISH (Latin) exactly: ${keepTerms}.
+- Maintain the EXACT format and line breaks shown below.
+
+REQUIRED OUTPUT (JSON only): {"messages": string[]}
+
+FORMAT REQUIREMENTS:
+
+messages[0] MUST match this template exactly (preserve blank lines and emoji labels):
+Hello ${patientName},
+
+We hope you had a satisfying experience with the services at ${clinicName}. Your feedback is highly valuable to us.
+
+Your visit details:
+📅 Date: ${date}
+🏥 Name of Center: ${clinicName}
+📍 Location: ${clinicAddress}
+
+You will receive a sample review in the next message and which you can change or modify.
+
+Best regards,
+Team ${clinicName}
+
+Note:
+- Write the sentences in ${targetName} native script, but keep the protected English words exactly as English (Latin).
+- Do NOT translate the clinic name or URLs.
+- Do NOT add any extra lines above/below this block.
+
+messages[1]:
+- ONLY the sample review text (no greeting, no footer, no link).
+- 1–3 sentences max, mixed style (local script + protected English words).
+- Keep ${clinicName} as-is (Latin).
+
+messages[2]:
+- ONLY the Google review link: ${gmbLink}
+- No extra text/words/emojis around it.
+
+Return ONLY the JSON object with {"messages": [...]}.`;
+}
+
+function buildTranslateUserPrompt(messages: string[], langCode: string, termsToKeep: string[], context: any): string {
+  const targetName = LANGUAGE_NAMES[langCode] || 'English';
+  const keepList = mergedLatinWhitelist(langCode, termsToKeep);
+  const keep = keepList.join(', ') || '(none)';
+  const p = context || {};
+  const patientName = p.patientName || '';
+  const clinicName = p.clinicName || '';
+  const clinicAddress = p.clinicAddress || '';
+  const date = p.date || '';
+  const gmbLink = p.gmbLink || '';
+
+  const inputObj = { messages };
+
+  return `Translate and ADAPT the messages into a MIXED style:
+- Sentences in ${targetName} (${langCode}) native script.
+- Keep these in ENGLISH (Latin) exactly: ${keep}
+- Enforce the SAME exact format as below for message[0].
+
+FORMAT to enforce for messages[0]:
+Hello ${patientName},
+
+We hope you had a satisfying experience with the services at ${clinicName}. Your feedback is highly valuable to us.
+
+Your visit details:
+📅 Date: ${date}
+🏥 Name of Center: ${clinicName}
+📍 Location: ${clinicAddress}
+
+You will receive a sample review in the next message and which you can change or modify.
+
+Best regards,
+Team ${clinicName}
+
+messages[1]: sample review only (no greeting/footer/link), 1–3 sentences, mixed style.
+messages[2]: ONLY this link: ${gmbLink}
+
+INPUT JSON:
+${JSON.stringify(inputObj)}
+
+Return ONLY: {"messages": string[]}`;
+}
+
+// ---------- single-pass helpers (no fallback) ----------
+async function translateOnce(
+  original: string[], lang: string, termsToKeep: string[], context: any
+): Promise<{ messages: string[] | null; model?: string; raw?: string }> {
+  const system = buildSystemInstruction(lang, termsToKeep, context?.clinicName);
+  const user = buildTranslateUserPrompt(original, lang, termsToKeep, context);
+  const { text, modelUsed } = await callGeminiJSON(TX_MODELS, [{ text: user }], system);
+  const parsed = safeParseJsonMessages(text);
+  return { messages: parsed, model: modelUsed, raw: text };
+}
+
+async function generateOnce(
+  input: any
+): Promise<{ messages: string[] | null; model?: string; raw?: string }> {
+  const system = buildSystemInstruction(input.language, input.context?.termsToKeep || [], input.context?.clinicName);
+  const user = buildGenUserPrompt(input);
+  const { text, modelUsed } = await callGeminiJSON(GEN_MODELS, [{ text: user }], system);
+  const parsed = safeParseJsonMessages(text);
+  return { messages: parsed, model: modelUsed, raw: text };
+}
+
+// ---------- handler ----------
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders() });
   }
+
   try {
-    const body = (await req.json()) as BundleRequest;
+    const body = await req.json();
     const now = new Date().toISOString();
+    const lang = (body.language || 'en').toLowerCase();
+    const terms = Array.isArray(body.context?.termsToKeep) ? body.context.termsToKeep : [];
+    const flow: Flow = body.flow;
 
-    const prompt = buildPrompt(body);
-    let messages: string[] | null = null;
-    try {
-      const text = await generateWithGemini(prompt);
-      messages = safeParseJsonArray(text);
-    } catch (aiErr) {
-      // Fallback to null (we will provide a minimal English fallback below)
-      console.warn('Gemini generation failed:', aiErr);
+    let result: { messages: string[] | null; model?: string; raw?: string };
+
+    if (Array.isArray(body.messages) && body.messages.length > 0) {
+      // translate-only
+      result = await translateOnce(body.messages, lang, terms, body.context || {});
+    } else {
+      // generate-only
+      result = await generateOnce(body);
     }
 
-    // If we got messages but they are not in the expected script for the target language, try a translation pass
-    if (messages && body.language && body.language !== 'en' && !messagesMatchTargetLanguage(messages, body.language)) {
-      const translated = await translateArrayToLanguage(messages, body.language, body.context.termsToKeep || []);
-      if (translated && messagesMatchTargetLanguage(translated, body.language)) {
-        messages = translated;
-      }
+    // 1) Parse failure → 422 with raw
+    if (!result.messages) {
+      return new Response(JSON.stringify({
+        error: 'parse_failed',
+        detail: 'Model did not return valid JSON {"messages": string[]}.',
+        model: result.model,
+        raw: result.raw
+      }), { status: 422, headers: { 'Content-Type': 'application/json', ...corsHeaders() } });
     }
 
-    if (!messages) {
-      // Fallback minimal set in EN to avoid breaking, but flag the issue
-      const fallback: string[] = body.flow === 'ai3'
-        ? [
-            `Hello ${body.context.patientName},\n\nWe hope you had a satisfying experience with the services at ${body.context.clinicName}.`,
-            `I recently visited ${body.context.clinicName}. The environment was clean and the process was organized.`,
-            `${body.context.gmbLink || ''}`
-          ]
-        : [
-            `Hello ${body.context.patientName}, thank you for choosing ${body.context.clinicName}. ${body.context.gmbLink || ''}`
-          ];
-      messages = fallback;
+    // 2) Script check: require some target script present
+    if (lang !== 'en' && !messagesMatchTargetLanguage(result.messages, lang)) {
+      return new Response(JSON.stringify({
+        error: 'language_mismatch',
+        detail: `Output is not in target script for language="${lang}".`,
+        model: result.model,
+        sample: result.messages.slice(0, 2),
+        raw: result.raw
+      }), { status: 422, headers: { 'Content-Type': 'application/json', ...corsHeaders() } });
     }
 
-    const resp: BundleResponse = {
-      language: body.language,
-      flow: body.flow,
-      messages,
-      model: MODEL,
-      terms_kept: body.context.termsToKeep || [],
-      created_at: now
+    // 3) OK
+    const resp = {
+      language: lang,
+      flow,
+      messages: result.messages,
+      model: result.model,
+      // Echo combined keep list for debugging/inspection
+      terms_kept: mergedLatinWhitelist(lang, terms),
+      created_at: now,
+      translated: Boolean(Array.isArray(body.messages) && body.messages.length > 0)
     };
-    return new Response(JSON.stringify(resp), { headers: { 'Content-Type': 'application/json', ...corsHeaders() } });
-  } catch (e) {
-    const msg = (e as any)?.message ? String((e as any).message) : String(e);
-    return new Response(JSON.stringify({ error: msg }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders() } });
+    return new Response(JSON.stringify(resp), {
+      headers: { 'Content-Type': 'application/json', ...corsHeaders() }
+    });
+
+  } catch (e: any) {
+    const msg = e?.message ? String(e.message) : String(e);
+    return new Response(JSON.stringify({ error: msg }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json', ...corsHeaders() }
+    });
   }
 });

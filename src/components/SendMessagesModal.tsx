@@ -2,7 +2,10 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { X, MessageCircle, Sparkles, Heart, Star, ExternalLink } from 'lucide-react';
 import type { Review } from '../types';
 import { useStore } from '../store/useStore';
-import { generateReviewMessageContent } from '../utils/messageGeneration';
+
+
+// Keep one reusable WhatsApp Web window across steps (desktop only)
+declare global { interface Window { __waHandle?: Window | null } }
 
 interface SendMessagesModalProps {
   isOpen: boolean;
@@ -36,28 +39,35 @@ export function SendMessagesModal({
   onClose,
   review,
   hasGMBLink,
-  // deprecated props intentionally ignored in manual-only mode
-  onSend,
-  onDirectSend,
   isLoading = false,
-  isDirectSending = false,
   isLoadingTemplates = false,
   hasTemplates = true,
   onEditAIReview,
   isGeneratingAIReview = false
 }: SendMessagesModalProps) {
-  const { user, reviewRequestTemplates, updateReviewStatus, updateReviewAiFirstMessageStatus } = useStore();
+  const { updateReviewStatus, updateReviewAiFirstMessageStatus } = useStore();
+  const { prepareLocalizedReviewBundle, markLocalizedBundleConsumed } = useStore();
   
   // Manual-only flow state
   type Mode = 'choose' | 'sequence';
   type Flow = 'ai3' | 'simple1';
   const [mode, setMode] = useState<Mode>('choose');
   const [flow, setFlow] = useState<Flow | null>(null);
+
+    // Language names for UI hints
+    const languageNames: Record<string, string> = {
+      en: 'English', hi: 'Hindi', gu: 'Gujarati', mr: 'Marathi', bn: 'Bengali', ta: 'Tamil', te: 'Telugu', kn: 'Kannada', ml: 'Malayalam', pa: 'Punjabi', ur: 'Urdu'
+    };
   const [sequenceSteps, setSequenceSteps] = useState<MessageOption[]>([]);
   const [currentStep, setCurrentStep] = useState<number>(0);
   const [stepStatus, setStepStatus] = useState<Record<string, 'pending' | 'sent' | 'skipped'>>({});
-  const [sendingManually, setSendingManually] = useState<string | null>(null);
-  const [justOpenedWA, setJustOpenedWA] = useState<boolean>(false); // retained for possible future auto-advance logic (not currently required)
+
+  // Language selection and localized bundle
+  const [selectedLanguage, setSelectedLanguage] = useState<string>('en');
+  const [bundleMessages, setBundleMessages] = useState<string[] | null>(null);
+  const [bundleLoading, setBundleLoading] = useState<boolean>(false);
+  const [bundleReady, setBundleReady] = useState<boolean>(false);
+  const [bundleError, setBundleError] = useState<string | null>(null);
   // Persist key to store progress per review
   const progressKey = review?.id ? `review_sequence_progress:${review.id}` : undefined;
 
@@ -118,33 +128,49 @@ export function SendMessagesModal({
 
   const optionById = (id: MessageOption['id']) => baseOptions.find(o => o.id === id)!;
 
+  const isMobileUA = () => /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+  // Open or reuse a named window/tab right away on user click (desktop)
+  function openOrReuseWAPlaceholder(): Window | null {
+    try {
+      const w = window.open('', 'whatsapp_web');
+      if (w) {
+        window.__waHandle = w;
+        try { w.focus(); } catch {}
+      }
+      return w;
+    } catch {
+      return null;
+    }
+  }
+
+  // Navigate the existing named window to URL (or open if missing)
+  function navigateWA(url: string) {
+    if (isMobileUA() || url.startsWith('whatsapp://')) {
+      window.open(url, '_blank');
+      return;
+    }
+    let w = window.__waHandle && !window.__waHandle.closed ? window.__waHandle : null;
+    if (!w) {
+      w = window.open('', 'whatsapp_web');
+      window.__waHandle = w;
+    }
+    if (w) {
+      try { (w as Window).location.href = url; (w as Window).focus(); return; } catch {}
+      window.open(url, 'whatsapp_web');
+    } else {
+      window.open(url, '_blank');
+    }
+  }
+
   const generateWhatsAppLink = (messageContent: string, phoneNumber: string) => {
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    const isMobile = isMobileUA();
     const baseUrl = isMobile ? 'whatsapp://' : 'https://web.whatsapp.com/';
     const formattedPhone = `91${phoneNumber}`;
     return `${baseUrl}send?phone=${formattedPhone}&text=${encodeURIComponent(messageContent)}`;
   };
 
-  const openWhatsAppForType = async (messageType: MessageOption['id']) => {
-    if (!review || !user) return;
-    setSendingManually(messageType);
-    try {
-      const result = await generateReviewMessageContent({
-        review,
-        messageType,
-        user,
-        reviewRequestTemplates
-      });
-      const whatsappLink = generateWhatsAppLink(result.messageContent, review.contactNumber);
-      window.open(whatsappLink, '_blank');
-      setJustOpenedWA(true);
-    } catch (error) {
-      console.error('Error generating message:', error);
-      alert(`Failed to generate message: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    } finally {
-      setSendingManually(null);
-    }
-  };
+  
 
   // Sequence builders
   const buildAI3 = (): MessageOption[] => [
@@ -165,7 +191,7 @@ export function SendMessagesModal({
   const canStartSimple1 = useMemo(() => !buildSimple1()[0].disabled, [baseOptions]);
   // No simple+link option; simple thank you already contains link
 
-  const startFlow = (target: Flow) => {
+  const startFlow = async (target: Flow) => {
     let steps: MessageOption[] = [];
     if (target === 'ai3') steps = buildAI3();
     if (target === 'simple1') steps = buildSimple1();
@@ -177,9 +203,33 @@ export function SendMessagesModal({
     setSequenceSteps(steps);
     setStepStatus(initial);
     setCurrentStep(0);
-    setMode('sequence');
-    setJustOpenedWA(false);
-    // persist initial
+    setBundleMessages(null);
+    setBundleReady(false);
+
+    // Always prepare bundle via edge function for ALL languages (including English)
+    if (selectedLanguage && review) {
+      try {
+        setBundleLoading(true);
+        // Enter sequence mode early to show progress banner
+        setMode('sequence');
+        const msgs = await prepareLocalizedReviewBundle(review, selectedLanguage, target);
+        if (msgs && msgs.length) {
+          setBundleMessages(msgs);
+          setBundleReady(true);
+        }
+        setBundleError(null);
+      } catch (e) {
+        console.error('Failed to prepare bundle:', e);
+        setBundleError('Failed to prepare messages. Please try again.');
+        setMode('sequence');
+      } finally {
+        setBundleLoading(false);
+      }
+    } else {
+      setMode('sequence');
+    }
+
+    // persist initial progress
     try {
       if (progressKey) {
         localStorage.setItem(progressKey, JSON.stringify({ flow: target, stepStatus: initial, ts: Date.now() }));
@@ -193,7 +243,20 @@ export function SendMessagesModal({
   const handleSendCurrentStep = async () => {
     const step = currentStepObj;
     if (!step) return;
-    await openWhatsAppForType(step.id);
+    
+    // Always use bundleMessages for all languages (including English)
+    if (!bundleReady || !bundleMessages) {
+      return;
+    }
+    
+    // Use pre-generated message from edge function
+    const msg = bundleMessages[currentStep];
+    if (!msg) return;
+    
+    // Open placeholder immediately on click (desktop)
+    if (!isMobileUA()) openOrReuseWAPlaceholder();
+    const link = generateWhatsAppLink(msg, review!.contactNumber);
+    navigateWA(link);
     // auto-mark as sent and advance
   const updated: Record<string, 'pending' | 'sent' | 'skipped'> = { ...stepStatus, [step.id]: 'sent' } as Record<string, 'pending' | 'sent' | 'skipped'>;
     setStepStatus(updated);
@@ -211,12 +274,33 @@ export function SendMessagesModal({
       if (flow === 'ai3' && review?.id) {
         try { await updateReviewStatus(review.id, 'sent', true); } catch (e) { console.error('Failed to update review status', e); }
       }
+      // mark bundle consumed for all languages
+      if (review?.id) {
+        try { await markLocalizedBundleConsumed(review.id); } catch {}
+      }
       try { if (progressKey) localStorage.removeItem(progressKey); } catch {}
     }
   };
 
   const handleSendSimpleNow = async () => {
-    await openWhatsAppForType('simple_thank_you');
+    if (selectedLanguage && review) {
+      const placeholder = isMobileUA() ? null : openOrReuseWAPlaceholder();
+      try {
+        const msgs = await prepareLocalizedReviewBundle(review, selectedLanguage, 'simple1');
+        const msg = msgs && msgs[0];
+        if (msg) {
+          const link = generateWhatsAppLink(msg, review.contactNumber);
+          navigateWA(link);
+        }
+        // Mark bundle consumed
+        await markLocalizedBundleConsumed(review.id);
+      } catch (e) {
+        console.error('Failed to prepare/send simple message:', e);
+        alert('Failed to prepare message. Please try again.');
+        try { if (placeholder && !placeholder.closed) placeholder.close(); } catch {}
+        return;
+      }
+    }
     // Mark as sent in DB for simple flow (no sequence)
     try {
       if (review?.id) {
@@ -238,7 +322,6 @@ export function SendMessagesModal({
     setSequenceSteps([]);
     setCurrentStep(0);
     setStepStatus({});
-    setJustOpenedWA(false);
     onClose();
   };
 
@@ -246,6 +329,8 @@ export function SendMessagesModal({
   useEffect(() => {
     if (!isOpen) return;
     if (!review?.id) return;
+    // initialize language from review or user default
+    setSelectedLanguage('en');
     try {
       if (progressKey) {
         const saved = localStorage.getItem(progressKey);
@@ -307,6 +392,26 @@ export function SendMessagesModal({
         
         {/* Content */}
         <div className="p-6 space-y-4 overflow-y-auto flex-1">
+          {/* Language Selector */}
+          <div className="flex items-center justify-between bg-gray-50 p-3 rounded-lg">
+            <span className="text-sm text-gray-700">Language</span>
+            <select
+              className="border rounded-md px-2 py-1 text-sm"
+              value={selectedLanguage}
+              onChange={(e) => setSelectedLanguage(e.target.value)}
+            >
+              <option value="en">English</option>
+              <option value="hi">Hindi</option>
+              <option value="gu">Gujarati</option>
+              <option value="mr">Marathi</option>
+              <option value="bn">Bengali</option>
+              <option value="ta">Tamil</option>
+              <option value="te">Telugu</option>
+              <option value="kn">Kannada</option>
+              <option value="ml">Malayalam</option>
+              <option value="pa">Punjabi</option>
+            </select>
+          </div>
           {/* Patient Info */}
           <div className="bg-gray-50 p-4 rounded-lg">
             <h4 className="font-medium text-gray-900 mb-2">Patient Information</h4>
@@ -352,12 +457,31 @@ export function SendMessagesModal({
                       <span className="text-xs text-gray-600">
                         {review?.status === 'sent' && review?.hasSequence
                           ? 'Sequence already completed'
-                          : ((!hasTemplates && 'AI templates missing') || (!hasGMBLink && 'Google review link missing'))}
+                          : selectedLanguage === 'en'
+                            ? (((!hasTemplates && 'AI templates missing') || (!hasGMBLink && 'Google review link missing'))) 
+                            : 'Will generate localized messages on demand'}
                       </span>
                     </div>
                   </div>
                 </div>
               </div>
+              {/* Message generation status banner */}
+              {(bundleLoading || bundleError || bundleMessages) && (
+                <div className={`rounded-md border p-3 text-sm ${bundleLoading ? 'bg-indigo-50 border-indigo-200 text-indigo-800' : bundleError ? 'bg-rose-50 border-rose-200 text-rose-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
+                  {bundleLoading && (
+                    <span className="inline-flex items-center">
+                      <span className="animate-spin rounded-full h-3 w-3 border-b-2 border-current mr-2"></span>
+                      Preparing {languageNames[selectedLanguage] || selectedLanguage} messages…
+                    </span>
+                  )}
+                  {!bundleLoading && !bundleError && bundleMessages && (
+                    <span>{languageNames[selectedLanguage] || selectedLanguage} messages ready.</span>
+                  )}
+                  {bundleError && (
+                    <span>{bundleError}</span>
+                  )}
+                </div>
+              )}
 
               {/* Simple flow (already includes link) */}
               <div className="border rounded-lg p-4">
@@ -374,7 +498,7 @@ export function SendMessagesModal({
                         onClick={handleSendSimpleNow}
                         disabled={!canStartSimple1}
                         className="inline-flex items-center px-3 py-2 text-sm rounded bg-gray-900 text-white hover:bg-black disabled:opacity-50"
-                        title={!canStartSimple1 ? 'Simple Thank You template not available' : 'Open WhatsApp with Simple Thank You'}
+                        title={!canStartSimple1 ? 'Simple Thank You template not available' : 'Generate and send Simple Thank You message'}
                       >
                         <ExternalLink className="h-4 w-4 mr-2" />
                         Send Simple Now
@@ -427,13 +551,13 @@ export function SendMessagesModal({
                       <div className="mt-3">
                         <button
                           onClick={handleSendCurrentStep}
-                          disabled={sendingManually === currentStepObj.id}
+                          disabled={!bundleReady}
                           className="inline-flex items-center px-3 py-2 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
                         >
-                          {sendingManually === currentStepObj.id ? (
+                          {!bundleReady ? (
                             <>
                               <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-2"></div>
-                              Opening WhatsApp...
+                              Preparing messages...
                             </>
                           ) : (
                             <>
@@ -461,7 +585,7 @@ export function SendMessagesModal({
         <div className="p-6 border-t border-gray-200 bg-gray-50 flex justify-between flex-shrink-0 rounded-b-xl">
           {mode === 'sequence' ? (
             <button
-              onClick={() => { setMode('choose'); setFlow(null); setSequenceSteps([]); setStepStatus({}); setCurrentStep(0); setJustOpenedWA(false); }}
+              onClick={() => { setMode('choose'); setFlow(null); setSequenceSteps([]); setStepStatus({}); setCurrentStep(0); }}
               className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
             >
               Back

@@ -88,7 +88,7 @@ interface Store {
   updateReportRequest: (id: string, updates: Partial<ReportRequest>) => Promise<void>;
   sendMessagesToSheet: (messages: SequenceMessage[]) => Promise<void>;
   // Localized bundles
-  prepareLocalizedReviewBundle: (review: Review, language: string, flow: 'ai3' | 'simple1') => Promise<void>;
+  prepareLocalizedReviewBundle: (review: Review, language: string, flow: 'ai3' | 'simple1') => Promise<string[]>;
   markLocalizedBundleConsumed: (reviewId: string) => Promise<void>;
   
   // Message editing
@@ -243,8 +243,8 @@ export const useStore = create<Store>()(
         const { user } = get();
         if (!user?.id) return;
         try {
-          const { data, error } = await executeWithRetry(() =>
-            supabase
+          const { data, error } = await executeWithRetry<any[]>(async () => {
+            const res = await supabase
               .from('appointments')
               .select(`
                 id,
@@ -262,8 +262,9 @@ export const useStore = create<Store>()(
                 created_at
               `)
               .eq('user_id', user.id)
-              .order('created_at', { ascending: false })
-          );
+              .order('created_at', { ascending: false });
+            return { data: res.data as any[], error: res.error };
+          });
           if (error) throw error;
           
           const transformedAppointments = data.map((apt: any) => ({
@@ -283,11 +284,11 @@ export const useStore = create<Store>()(
           }));
           
           set({ appointments: transformedAppointments });
-        } catch (error) {
+        } catch (error: any) {
           console.error('Error fetching appointments:', error);
           
           // Don't throw the error, just log it and set empty array
-          if (error?.message?.includes('Failed to fetch')) {
+          if ((error as any)?.message?.includes('Failed to fetch')) {
             console.warn('Network connectivity issues detected. Appointments will be loaded when connection is restored.');
             set({ appointments: [] });
           } else {
@@ -438,8 +439,8 @@ export const useStore = create<Store>()(
         if (!user?.id) return;
 
         try {
-          const { data, error } = await executeWithRetry(() =>
-            supabase
+          const { data, error } = await executeWithRetry<any[]>(async () => {
+            const res = await supabase
               .from('reviews')
               .select(`
                 id,
@@ -459,15 +460,16 @@ export const useStore = create<Store>()(
                 created_at
               `)
               .eq('user_id', user.id)
-              .order('created_at', { ascending: false })
-          );
+              .order('created_at', { ascending: false });
+            return { data: res.data as any[], error: res.error };
+          });
 
           if (error) throw error;
           
           console.log('Raw data from Supabase:', data);
           
           // Transform the data to match our Review type
-          const transformedReviews = data.map((review: any) => ({
+          const transformedReviews: Review[] = data.map((review: any) => ({
             id: review.id,
             userId: review.user_id,
             patientName: review.patient_name || 'Unknown Patient',
@@ -483,16 +485,16 @@ export const useStore = create<Store>()(
             localizedMessageBundle: review.localized_message_bundle || null,
             localizedMessageBundleStatus: review.localized_message_bundle_status || undefined,
             createdAt: review.created_at
-          })).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          })).sort((a: Review, b: Review) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
           
           console.log('Transformed reviews:', transformedReviews);
           set({ reviews: transformedReviews });
-        } catch (error) {
+        } catch (error: any) {
           console.error('Error fetching reviews:', error);
           
           // Don't throw the error, just log it and set empty array
           // This prevents the app from breaking when there are network issues
-          if (error?.message?.includes('Failed to fetch')) {
+          if ((error as any)?.message?.includes('Failed to fetch')) {
             console.warn('Network connectivity issues detected. Reviews will be loaded when connection is restored.');
             set({ reviews: [] });
           } else {
@@ -616,8 +618,7 @@ export const useStore = create<Store>()(
           console.log('[TEMPLATES] Transformed templates:', transformedTemplates);
           
           // Ensure we have the required templates by adding defaults if missing
-          const requiredTypes = ['ai_integrated', 'simple_thank_you'];
-          const existingTypes = transformedTemplates.map(t => t.templateType);
+          const existingTypes = transformedTemplates.map((t: any) => t.templateType);
           console.log('[TEMPLATES] Existing template types:', existingTypes);
           
           const missingTemplates = defaultReviewRequestTemplates.filter(
@@ -919,8 +920,8 @@ export const useStore = create<Store>()(
         }
         
         try {
-          const { data, error } = await executeWithRetry(() =>
-            supabase
+          const { data, error } = await executeWithRetry<any[]>(async () => {
+            const res = await supabase
               .from('sequence_templates')
               .select(`
                 id,
@@ -932,8 +933,9 @@ export const useStore = create<Store>()(
                 sequence_order,
                 target_profile_type
               `)
-              .order('sequence_order', { ascending: true })
-          );
+              .order('sequence_order', { ascending: true });
+            return { data: res.data as any[], error: res.error };
+          });
 
           if (error) throw error;
           
@@ -950,11 +952,11 @@ export const useStore = create<Store>()(
           
           set({ sequenceTemplates: transformedTemplates });
           get().setCachedData('sequenceTemplates', transformedTemplates, STATIC_CACHE_DURATION);
-        } catch (error) {
+        } catch (error: any) {
           console.error('Error fetching sequence templates:', error);
           
           // Don't throw the error, just log it and set empty array
-          if (error?.message?.includes('Failed to fetch')) {
+          if ((error as any)?.message?.includes('Failed to fetch')) {
             console.warn('Network connectivity issues detected. Sequence templates will be loaded when connection is restored.');
             set({ sequenceTemplates: [] });
           }
@@ -966,17 +968,18 @@ export const useStore = create<Store>()(
         if (!user?.id) return;
 
         try {
-          const { data, error } = await executeWithRetry(() =>
-            supabase
+          const { data, error } = await executeWithRetry<any[]>(async () => {
+            const res = await supabase
               .from('sequence_messages')
               .select('*')
               .eq('user_id', user.id)
-              .order('created_at', { ascending: false })
-          );
+              .order('created_at', { ascending: false });
+            return { data: res.data as any[], error: res.error };
+          });
 
           if (error) throw error;
           
-          const transformedMessages = data.map(message => ({
+          const transformedMessages = data.map((message: any) => ({
             id: message.id,
             profileId: message.profile_id,
             patientName: message.patient_name,
@@ -988,11 +991,11 @@ export const useStore = create<Store>()(
           }));
           
           set({ sequenceMessages: transformedMessages });
-        } catch (error) {
+        } catch (error: any) {
           console.error('Error fetching sequence messages:', error);
           
           // Don't throw the error, just log it and set empty array
-          if (error?.message?.includes('Failed to fetch')) {
+          if ((error as any)?.message?.includes('Failed to fetch')) {
             console.warn('Network connectivity issues detected. Sequence messages will be loaded when connection is restored.');
             set({ sequenceMessages: [] });
           }
@@ -1126,17 +1129,18 @@ export const useStore = create<Store>()(
 
         try {
           // Check if user is super admin to determine query scope
-          const { data: userData, error: userError } = await executeWithRetry(() =>
-            supabase
+          const { data: userData, error: userError } = await executeWithRetry<{ role: string } | null>(async () => {
+            const res = await supabase
               .from('users')
               .select('role')
               .eq('id', user.id)
-              .single()
-          );
+              .single();
+            return { data: res.data as { role: string } | null, error: res.error };
+          });
 
           if (userError) throw userError;
 
-          const { data, error } = await executeWithRetry(() => {
+          const { data, error } = await executeWithRetry<any[]>(async () => {
             let query = supabase
               .from('report_requests')
               .select(`
@@ -1158,11 +1162,13 @@ export const useStore = create<Store>()(
               .order('created_at', { ascending: false });
 
             // If not super admin, filter by user_id
-            if (userData.role !== 'super_admin') {
+            const isSuperAdmin = userData?.role === 'super_admin';
+            if (!isSuperAdmin) {
               query = query.eq('user_id', user.id);
             }
 
-            return query;
+            const res = await query;
+            return { data: res.data as any[], error: res.error };
           });
           if (error) throw error;
 
@@ -1185,12 +1191,12 @@ export const useStore = create<Store>()(
           }));
 
           set({ reportRequests: transformedRequests });
-        } catch (error) {
+        } catch (error: any) {
           console.error('Error fetching report requests:', error);
           
           // Don't throw the error, just log it and set empty array
           // This prevents the app from breaking when there are network issues
-          if (error?.message?.includes('Failed to fetch')) {
+          if ((error as any)?.message?.includes('Failed to fetch')) {
             console.warn('Network connectivity issues detected. Report requests will be loaded when connection is restored.');
             set({ reportRequests: [] });
           } else {
@@ -1340,14 +1346,15 @@ export const useStore = create<Store>()(
               termsToKeep: [user.clinicName || '', 'MRI', 'CBC', 'X-ray', 'CT', 'ECG'].filter(Boolean)
             }
           };
-          const { data, error } = await executeWithRetry(() =>
-            supabase.functions.invoke('generate-review-bundle', { body })
-          );
+          const { data, error } = await executeWithRetry<any>(async () => {
+            const res = await supabase.functions.invoke('generate-review-bundle', { body });
+            return { data: res.data as any, error: res.error };
+          });
           if (error) throw error;
 
           // Persist on reviews
-          const { error: upErr } = await executeWithRetry(() =>
-            supabase
+          const { error: upErr } = await executeWithRetry<any>(async () => {
+            const res = await supabase
               .from('reviews')
               .update({
                 language,
@@ -1359,8 +1366,9 @@ export const useStore = create<Store>()(
                 has_sequence: flow === 'ai3'
               })
               .eq('id', review.id)
-              .select()
-          );
+              .select();
+            return { data: res.data as any, error: res.error };
+          });
           if (upErr) throw upErr;
 
           // Update local state
@@ -1376,6 +1384,7 @@ export const useStore = create<Store>()(
               hasSequence: flow === 'ai3'
             } : r)
           }));
+          return ((data as any)?.messages as string[]) || [];
         } catch (error) {
           console.error('Error preparing localized bundle:', error);
           throw error;
@@ -1385,18 +1394,19 @@ export const useStore = create<Store>()(
       // Mark the localized bundle as consumed after sending
       markLocalizedBundleConsumed: async (reviewId: string) => {
         try {
-          const { error } = await executeWithRetry(() =>
-            supabase
+          const { error } = await executeWithRetry<any>(async () => {
+            const res = await supabase
               .from('reviews')
               .update({ localized_message_bundle_status: 'consumed' })
               .eq('id', reviewId)
-              .select()
-          );
+              .select();
+            return { data: res.data as any, error: res.error };
+          });
           if (error) throw error;
           set((state) => ({
             reviews: state.reviews.map(r => r.id === reviewId ? { ...r, localizedMessageBundleStatus: 'consumed' } : r)
           }));
-        } catch (error) {
+        } catch (error: any) {
           console.error('Error marking bundle consumed:', error);
           throw error;
         }
