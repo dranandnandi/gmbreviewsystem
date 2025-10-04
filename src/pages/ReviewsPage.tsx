@@ -36,12 +36,13 @@ export function ReviewsPage() {
     updateReviewStatus, 
     updateReviewAiReviewText,
     updateReviewAiFirstMessageStatus,
-  sequenceTemplates, 
+    sequenceTemplates, 
     addSequenceMessage, 
     fetchSequenceMessages,
     fetchSequenceTemplates,
     queueReviewMessageForSheet,
-    updateReviewFields
+    updateReviewFields,
+    deleteReview
   } = useStore();
   
   // Add logging for template state
@@ -232,6 +233,18 @@ export function ReviewsPage() {
   const handleOpenEditReview = (review: typeof reviews[0]) => {
     setSelectedReviewForEdit(review);
     setShowEditReviewModal(true);
+  };
+
+  const handleDeleteReview = async (review: typeof reviews[0]) => {
+    try {
+      await deleteReview(review.id);
+      setSuccessMessage(`Review for ${review.patientName} has been deleted.`);
+      setTimeout(() => setSuccessMessage(''), 3000);
+    } catch (error) {
+      console.error('Error deleting review:', error);
+      setErrorMessage('Failed to delete review. Please try again.');
+      setTimeout(() => setErrorMessage(''), 5000);
+    }
   };
 
   const handleSaveReviewEdits = async (
@@ -831,6 +844,7 @@ export function ReviewsPage() {
                 hasTemplates={reviewRequestTemplates.length > 0}
                 onEditAIReview={handleOpenAIReviewEditor}
                 onEditReview={handleOpenEditReview}
+                onDeleteReview={handleDeleteReview}
               />
             ))
           )
@@ -976,6 +990,7 @@ export function ReviewsPage() {
                           hasTemplates={reviewRequestTemplates.length > 0}
                           onEditAIReview={handleOpenAIReviewEditor}
                           onEditReview={handleOpenEditReview}
+                          onDeleteReview={handleDeleteReview}
                         />
                       </div>
                     </td>

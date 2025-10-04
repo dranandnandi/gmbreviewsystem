@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { MoreVertical, MessageCircle, Clock, ChevronRight } from 'lucide-react';
 import type { Review } from '../types';
 
@@ -11,17 +11,19 @@ interface ReviewActionsDropdownProps {
   hasTemplates: boolean;
   onEditAIReview?: (review: Review) => void; // Opens AI review editor modal
   onEditReview?: (review: Review) => void; // Opens core review edit modal
+  onDeleteReview?: (review: Review) => void; // Delete review with confirmation
 }
 
 export function ReviewActionsDropdown({
   review,
   onOpenSendMessagesModal,
   onCreateFollowup,
-  hasGMBLink,
+  hasGMBLink: _hasGMBLink, // Unused but kept for interface compatibility
   isLoadingTemplates,
   hasTemplates,
   onEditAIReview,
-  onEditReview
+  onEditReview,
+  onDeleteReview
 }: ReviewActionsDropdownProps) {
   // Add logging for props
   console.log('[REVIEW ACTIONS DROPDOWN] Props received:', {
@@ -117,6 +119,27 @@ export function ReviewActionsDropdown({
               </div>
               {!review.hasSequence && <ChevronRight className="h-3 w-3 text-gray-400" />}
             </button>
+
+            {onDeleteReview && (
+              <>
+                <div className="border-t border-gray-100 my-1"></div>
+                <button
+                  onClick={() => handleAction(() => {
+                    if (window.confirm(`Are you sure you want to delete the review for ${review.patientName}? This action cannot be undone.`)) {
+                      onDeleteReview(review);
+                    }
+                  })}
+                  className="flex items-center w-full px-4 py-2 text-sm text-red-700 hover:bg-red-50 transition-colors"
+                  role="menuitem"
+                  title="Delete this review permanently"
+                >
+                  <svg className="h-4 w-4 mr-3 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  Delete Review
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}

@@ -1,4 +1,4 @@
-import React from 'react';
+
 import { format } from 'date-fns';
 import { MessageCircle } from 'lucide-react';
 import { InteractiveStatusBadge } from './InteractiveStatusBadge';
@@ -16,6 +16,7 @@ interface ReviewCardProps {
   hasTemplates: boolean;
   onEditAIReview?: (review: Review) => void;
   onEditReview?: (review: Review) => void;
+  onDeleteReview?: (review: Review) => void;
 }
 
 export function ReviewCard({
@@ -28,7 +29,8 @@ export function ReviewCard({
   isLoadingTemplates,
   hasTemplates,
   onEditAIReview,
-  onEditReview
+  onEditReview,
+  onDeleteReview
 }: ReviewCardProps) {
   // Add logging for props
   console.log('[REVIEW CARD] Props received:', {
@@ -98,6 +100,7 @@ export function ReviewCard({
             hasTemplates={hasTemplates}
             onEditAIReview={onEditAIReview}
             onEditReview={onEditReview}
+            onDeleteReview={onDeleteReview}
           />
         </div>
       </div>

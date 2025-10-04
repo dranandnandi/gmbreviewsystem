@@ -191,4 +191,5 @@ export interface Store {
   queueReviewMessageForSheet: (review: Review, messageType: 'ai_first' | 'ai_second' | 'simple_thank_you' | 'gmb_link') => Promise<SequenceMessage>;
   prepareLocalizedReviewBundle: (review: Review, language: string, flow: 'ai3' | 'simple1') => Promise<string[]>;
   markLocalizedBundleConsumed: (reviewId: string) => Promise<void>;
+  deleteReview: (reviewId: string) => Promise<void>;
 }

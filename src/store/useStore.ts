@@ -90,6 +90,7 @@ interface Store {
   // Localized bundles
   prepareLocalizedReviewBundle: (review: Review, language: string, flow: 'ai3' | 'simple1') => Promise<string[]>;
   markLocalizedBundleConsumed: (reviewId: string) => Promise<void>;
+  deleteReview: (reviewId: string) => Promise<void>;
   
   // Message editing
   updateSequenceMessageContent: (messageId: string, newContent: string) => Promise<void>;
@@ -1408,6 +1409,25 @@ export const useStore = create<Store>()(
           }));
         } catch (error: any) {
           console.error('Error marking bundle consumed:', error);
+          throw error;
+        }
+      },
+      
+      deleteReview: async (reviewId: string) => {
+        try {
+          const { error } = await supabase
+            .from('reviews')
+            .delete()
+            .eq('id', reviewId);
+
+          if (error) throw error;
+
+          // Remove from local state
+          set((state) => ({
+            reviews: state.reviews.filter(review => review.id !== reviewId)
+          }));
+        } catch (error: any) {
+          console.error('Error deleting review:', error);
           throw error;
         }
       },
