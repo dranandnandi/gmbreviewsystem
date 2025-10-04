@@ -948,7 +948,7 @@ export function ReviewsPage() {
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                       <InteractiveStatusBadge review={review} onToggleStatus={handleToggleStatus} />
                     </td>
-                    <td className="px-6 py-4 text-sm overflow-visible">
+                    <td className="px-6 py-4 text-sm actions-cell">
                       <div className="flex flex-wrap items-center gap-2">
                         {/* Primary Action Button */}
                         {!review.aiReviewFirstMessageSent ? (

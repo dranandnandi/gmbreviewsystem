@@ -49,3 +49,9 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* Actions column should have visible overflow for dropdowns */
+.reviews-table td.actions-cell {
+  overflow: visible !important;
+  white-space: normal !important;
+}
