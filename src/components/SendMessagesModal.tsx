@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { X, MessageCircle, Sparkles, Heart, Star, ExternalLink } from 'lucide-react';
 import type { Review } from '../types';
 import { useStore } from '../store/useStore';
+import AIProcessingLoader from './AIProcessingLoader';
 
 
 // Keep one reusable WhatsApp Web window across steps (desktop only)
@@ -68,6 +69,8 @@ export function SendMessagesModal({
   const [bundleLoading, setBundleLoading] = useState<boolean>(false);
   const [bundleReady, setBundleReady] = useState<boolean>(false);
   const [bundleError, setBundleError] = useState<string | null>(null);
+  // AI Processing Loader state
+  const [showAIProcessing, setShowAIProcessing] = useState<boolean>(false);
   // Persist key to store progress per review
   const progressKey = review?.id ? `review_sequence_progress:${review.id}` : undefined;
 
@@ -210,6 +213,7 @@ export function SendMessagesModal({
     if (selectedLanguage && review) {
       try {
         setBundleLoading(true);
+        setShowAIProcessing(true);
         // Enter sequence mode early to show progress banner
         setMode('sequence');
         const msgs = await prepareLocalizedReviewBundle(review, selectedLanguage, target);
@@ -224,6 +228,7 @@ export function SendMessagesModal({
         setMode('sequence');
       } finally {
         setBundleLoading(false);
+        setShowAIProcessing(false);
       }
     } else {
       setMode('sequence');
@@ -286,6 +291,7 @@ export function SendMessagesModal({
     if (selectedLanguage && review) {
       const placeholder = isMobileUA() ? null : openOrReuseWAPlaceholder();
       try {
+        setShowAIProcessing(true);
         const msgs = await prepareLocalizedReviewBundle(review, selectedLanguage, 'simple1');
         const msg = msgs && msgs[0];
         if (msg) {
@@ -299,6 +305,8 @@ export function SendMessagesModal({
         alert('Failed to prepare message. Please try again.');
         try { if (placeholder && !placeholder.closed) placeholder.close(); } catch {}
         return;
+      } finally {
+        setShowAIProcessing(false);
       }
     }
     // Mark as sent in DB for simple flow (no sequence)
@@ -368,8 +376,14 @@ export function SendMessagesModal({
   if (!isOpen || !review) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-xl max-w-md w-full my-8 max-h-[calc(100vh-2rem)] flex flex-col shadow-2xl">
+    <>
+      <AIProcessingLoader 
+        isVisible={showAIProcessing}
+        language={selectedLanguage}
+        onComplete={() => setShowAIProcessing(false)}
+      />
+      <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 overflow-y-auto">
+        <div className="bg-white rounded-xl max-w-md w-full my-8 max-h-[calc(100vh-2rem)] flex flex-col shadow-2xl">
         {/* Header */}
         <div className="p-6 border-b border-gray-200 flex justify-between items-center flex-shrink-0">
           <div>
@@ -601,7 +615,8 @@ export function SendMessagesModal({
             Close
           </button>
         </div>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
