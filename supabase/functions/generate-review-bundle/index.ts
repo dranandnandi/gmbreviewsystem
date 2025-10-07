@@ -204,7 +204,44 @@ function buildGenUserPrompt(input: any): string {
   const clinicAddress = p.clinicAddress || '';
   const date = p.date || '';
   const gmbLink = p.gmbLink || '';
+  const flow = input.flow || 'ai3';
 
+  if (flow === 'simple1') {
+    // Simple Thank You - Single message with GMB link
+    return `TASK: Generate a single WhatsApp-friendly patient thank you message in a MIXED style:
+- Sentences in ${targetName} (${langCode}) native script.
+- Keep the following in ENGLISH (Latin) exactly: ${keepTerms}.
+- Maintain the EXACT format and line breaks shown below.
+
+REQUIRED OUTPUT (JSON only): {"messages": string[]}
+
+FORMAT REQUIREMENTS:
+
+messages[0] MUST match this template exactly (preserve blank lines and emoji labels):
+Hello ${patientName},
+
+We hope you had a satisfying experience with the services at ${clinicName}. Your feedback is highly valuable to us.
+
+Your visit details:
+📅 Date: ${date}
+🏥 Name of Center: ${clinicName}
+📍 Location: ${clinicAddress}
+
+Please post your review to ${gmbLink}
+
+Best regards,
+Team ${clinicName}
+
+Note:
+- Write the sentences in ${targetName} native script, but keep the protected English words exactly as English (Latin).
+- Do NOT translate the clinic name or URLs.
+- Do NOT add any extra lines above/below this block.
+- Return ONLY ONE message in the array.
+
+Return ONLY the JSON object with {"messages": ["single_message_here"]}.`;
+  }
+
+  // AI3 flow - 3 messages format
   return `TASK: Generate WhatsApp-friendly patient review messages in a MIXED style:
 - Sentences in ${targetName} (${langCode}) native script.
 - Keep the following in ENGLISH (Latin) exactly: ${keepTerms}.
@@ -246,7 +283,7 @@ messages[2]:
 Return ONLY the JSON object with {"messages": [...]}.`;
 }
 
-function buildTranslateUserPrompt(messages: string[], langCode: string, termsToKeep: string[], context: any): string {
+function buildTranslateUserPrompt(messages: string[], langCode: string, termsToKeep: string[], context: any, flow?: string): string {
   const targetName = LANGUAGE_NAMES[langCode] || 'English';
   const keepList = mergedLatinWhitelist(langCode, termsToKeep);
   const keep = keepList.join(', ') || '(none)';
@@ -259,6 +296,35 @@ function buildTranslateUserPrompt(messages: string[], langCode: string, termsToK
 
   const inputObj = { messages };
 
+  if (flow === 'simple1') {
+    // Simple Thank You - Single message format
+    return `Translate and ADAPT the message into a MIXED style:
+- Sentences in ${targetName} (${langCode}) native script.
+- Keep these in ENGLISH (Latin) exactly: ${keep}
+- Enforce the SAME exact format as below for the single message.
+
+FORMAT to enforce:
+Hello ${patientName},
+
+We hope you had a satisfying experience with the services at ${clinicName}. Your feedback is highly valuable to us.
+
+Your visit details:
+📅 Date: ${date}
+🏥 Name of Center: ${clinicName}
+📍 Location: ${clinicAddress}
+
+Please post your review to ${gmbLink}
+
+Best regards,
+Team ${clinicName}
+
+INPUT JSON:
+${JSON.stringify(inputObj)}
+
+Return ONLY: {"messages": ["single_translated_message"]}`;
+  }
+
+  // AI3 flow - 3 messages format
   return `Translate and ADAPT the messages into a MIXED style:
 - Sentences in ${targetName} (${langCode}) native script.
 - Keep these in ENGLISH (Latin) exactly: ${keep}
@@ -290,10 +356,10 @@ Return ONLY: {"messages": string[]}`;
 
 // ---------- single-pass helpers (no fallback) ----------
 async function translateOnce(
-  original: string[], lang: string, termsToKeep: string[], context: any
+  original: string[], lang: string, termsToKeep: string[], context: any, flow?: string
 ): Promise<{ messages: string[] | null; model?: string; raw?: string }> {
   const system = buildSystemInstruction(lang, termsToKeep, context?.clinicName);
-  const user = buildTranslateUserPrompt(original, lang, termsToKeep, context);
+  const user = buildTranslateUserPrompt(original, lang, termsToKeep, context, flow);
   const { text, modelUsed } = await callGeminiJSON(TX_MODELS, [{ text: user }], system);
   const parsed = safeParseJsonMessages(text);
   return { messages: parsed, model: modelUsed, raw: text };
@@ -326,7 +392,7 @@ Deno.serve(async (req: Request) => {
 
     if (Array.isArray(body.messages) && body.messages.length > 0) {
       // translate-only
-      result = await translateOnce(body.messages, lang, terms, body.context || {});
+      result = await translateOnce(body.messages, lang, terms, body.context || {}, flow);
     } else {
       // generate-only
       result = await generateOnce(body);
