@@ -216,7 +216,14 @@ export function SendMessagesModal({
         setShowAIProcessing(true);
         // Enter sequence mode early to show progress banner
         setMode('sequence');
-        const msgs = await prepareLocalizedReviewBundle(review, selectedLanguage, target);
+        
+        // Add timeout safety net (5 seconds max)
+        const timeoutPromise = new Promise<string[]>((_, reject) => 
+          setTimeout(() => reject(new Error('Bundle preparation timed out')), 5000)
+        );
+        const bundlePromise = prepareLocalizedReviewBundle(review, selectedLanguage, target);
+        
+        const msgs = await Promise.race([bundlePromise, timeoutPromise]);
         if (msgs && msgs.length) {
           setBundleMessages(msgs);
           setBundleReady(true);
@@ -292,7 +299,14 @@ export function SendMessagesModal({
       const placeholder = isMobileUA() ? null : openOrReuseWAPlaceholder();
       try {
         setShowAIProcessing(true);
-        const msgs = await prepareLocalizedReviewBundle(review, selectedLanguage, 'simple1');
+        
+        // Add timeout safety net (5 seconds max)
+        const timeoutPromise = new Promise<string[]>((_, reject) => 
+          setTimeout(() => reject(new Error('Message preparation timed out')), 5000)
+        );
+        const bundlePromise = prepareLocalizedReviewBundle(review, selectedLanguage, 'simple1');
+        
+        const msgs = await Promise.race([bundlePromise, timeoutPromise]);
         const msg = msgs && msgs[0];
         if (msg) {
           const link = generateWhatsAppLink(msg, review.contactNumber);
@@ -372,6 +386,16 @@ export function SendMessagesModal({
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, review?.id, review?.status, review?.hasSequence, baseOptions]);
+
+  // Cleanup effect: Reset loading states when modal closes
+  useEffect(() => {
+    if (!isOpen) {
+      // Reset all loading states to prevent stuck states
+      setBundleLoading(false);
+      setShowAIProcessing(false);
+      setBundleError(null);
+    }
+  }, [isOpen]);
 
   if (!isOpen || !review) return null;
 

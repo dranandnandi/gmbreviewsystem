@@ -193,3 +193,63 @@ export interface Store {
   markLocalizedBundleConsumed: (reviewId: string) => Promise<void>;
   deleteReview: (reviewId: string) => Promise<void>;
 }
+
+// New interfaces for clinic information management
+export interface ClinicInformation {
+  id: string;
+  userId: string;
+  clinicName: string;
+  clinicAddress?: string;
+  clinicPhone?: string;
+  clinicEmail?: string;
+  clinicWebsite?: string;
+  gmbLink?: string;
+  logoUrl?: string;
+  primaryColor?: string;
+  secondaryColor?: string;
+  businessHours?: Record<string, { open: string; close: string; isOpen: boolean }>;
+  specializations?: string[];
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SequenceTheme {
+  id: string;
+  userId: string;
+  themeName: string;
+  themeDescription?: string;
+  profileType: string;
+  language: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SequenceTemplateAI {
+  id: string;
+  userId: string;
+  themeId?: string;
+  messageTemplate: string;
+  sequenceDays: number;
+  sequenceOrder: number;
+  profileType: string;
+  language: string;
+  tone?: string;
+  maxWords?: number;
+  placeholders?: Record<string, string>;
+  isActive: boolean;
+  generatedBy: 'ai' | 'manual' | 'imported';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GenerateSequenceParams {
+  theme: string;
+  details: string;
+  numMessages: number;
+  language: string;
+  profileType: string;
+  clinicName: string;
+  clinicPhone: string;
+}

@@ -10,6 +10,7 @@ import { CreativesPage } from './pages/CreativesPage';
 import { SequenceMessagesPage } from './pages/SequenceMessagesPage';
 import { SimplifiedSequenceMessagesPage } from './pages/SimplifiedSequenceMessagesPage';
 import { AISequenceTemplateGeneratorPage } from './pages/AISequenceTemplateGeneratorPage';
+import ClinicInformationPage from './pages/ClinicInformationPage';
 import { AdminPage } from './pages/AdminPage';
 import { useStore } from './store/useStore';
 
@@ -104,6 +105,14 @@ function App() {
                 <FeatureRoute feature="creatives">
                   <CreativesPage />
                 </FeatureRoute>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="clinic-information"
+            element={
+              <ProtectedRoute>
+                <ClinicInformationPage />
               </ProtectedRoute>
             }
           />

@@ -20,6 +20,14 @@ export function DashboardPage() {
   } = useStore();
   const navigate = useNavigate();
   
+  // Check if user needs to complete business setup
+  React.useEffect(() => {
+    if (user && user.clinicName?.includes("'s Business")) {
+      navigate('/business-setup');
+      return;
+    }
+  }, [user, navigate]);
+  
   // Lazy load data when dashboard mounts
   React.useEffect(() => {
     if (user?.id) {

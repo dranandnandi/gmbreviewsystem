@@ -1,7 +1,7 @@
 import React from 'react';
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useStore } from '../store/useStore';
-import { LayoutDashboard, Home, MessageSquare, Settings, LogOut, Clock, Menu, X, Palette, Shield, FileText, Wand2 } from 'lucide-react';
+import { LayoutDashboard, Home, MessageSquare, Settings, LogOut, Clock, Menu, X, Palette, Shield, FileText, Wand2, Building2 } from 'lucide-react';
 import { Send } from 'lucide-react';
 
 const defaultStyles = {
@@ -17,6 +17,7 @@ const allNavItems = [
   { path: '/quick-send', icon: Send, label: 'Quick Send', feature: 'sequences' },
   { path: '/ai-sequence-generator', icon: Wand2, label: 'AI Generator', feature: 'sequences' },
   { path: '/creatives', icon: Palette, label: 'Your Creatives', feature: 'creatives' },
+  { path: '/clinic-information', icon: Building2, label: 'Clinic Info' },
   { path: '/admin', icon: Shield, label: 'Admin Panel', adminOnly: true },
   { path: '/settings', icon: Settings, label: 'Settings' }
 ];
@@ -98,53 +99,52 @@ export function Layout() {
 
       <nav className="shadow-md" style={headerStyle}>
         <div className="max-w-7xl mx-auto px-4">
-          <div className="flex justify-between h-16">
-            <div className="flex items-center">
+          <div className="flex flex-wrap justify-between items-center min-h-[64px] py-2">
+            <div className="flex items-center w-full lg:w-auto">
               <button
                 onClick={toggleMobileMenu}
                 className="inline-flex items-center justify-center p-2 rounded-md lg:hidden"
               >
                 <Menu className="h-6 w-6" />
               </button>
-              <div className="flex-shrink-0 flex items-center space-x-3 ml-2">
+              <div className="flex-shrink-0 flex items-center space-x-1 xl:space-x-2 ml-1">
                 {user.logo && (
                   <img 
                     src={user.logo} 
                     alt={user.clinicName} 
-                    className="h-8 w-auto"
+                    className="h-5 xl:h-8 w-auto"
                   />
                 )}
-                <h1 className="text-xl font-bold truncate max-w-[200px]">{user.clinicName}</h1>
-              </div>
-              <div className="hidden lg:ml-6 lg:flex lg:space-x-8">
-                {navItems.map(item => (
-                  <Link
-                    key={item.path}
-                    to={item.path}
-                    className={`inline-flex items-center px-1 pt-1 text-sm font-medium ${
-                      location.pathname === item.path ? '' : 'opacity-80 hover:opacity-100'
-                    }`}
-                  >
-                    <item.icon className="w-4 h-4 mr-2" />
-                    {item.label}
-                  </Link>
-                ))}
+                <h1 className="text-sm xl:text-xl font-bold truncate max-w-[120px] xl:max-w-[200px]">{user.clinicName}</h1>
               </div>
             </div>
-            <div className="flex items-center">
-              <span className="text-sm mr-4 hidden sm:block">
-                {user.name} ({user.role})
+            <div className="hidden lg:flex lg:flex-wrap lg:items-center lg:justify-center lg:flex-1 lg:gap-1 xl:gap-2">
+              {navItems.map(item => (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  className={`inline-flex items-center px-1 xl:px-3 py-1 text-xs xl:text-sm font-medium whitespace-nowrap rounded transition-all ${
+                    location.pathname === item.path 
+                      ? 'bg-white bg-opacity-20 text-white' 
+                      : 'opacity-80 hover:opacity-100 hover:bg-white hover:bg-opacity-10'
+                  }`}
+                >
+                  <item.icon className="w-3 h-3 xl:w-4 xl:h-4 mr-0.5 xl:mr-2 flex-shrink-0" />
+                  <span className="hidden xl:inline">{item.label}</span>
+                  <span className="xl:hidden text-[10px]">{item.label.split(' ')[0]}</span>
+                </Link>
+              ))}
+            </div>
+            <div className="flex items-center space-x-1 lg:flex-shrink-0">
+              <span className="text-xs mr-1 hidden xl:block truncate max-w-[120px]">
+                {user.name}
               </span>
               <button
                 onClick={handleLogout}
-                className="inline-flex items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md bg-opacity-20 hover:bg-opacity-30 ml-2"
-                style={{ 
-                  backgroundColor: user.secondaryColor || '#f3f4f6',
-                  color: user.primaryColor ? '#ffffff' : '#374151'
-                }}
+                className="inline-flex items-center px-2 xl:px-3 py-1 border border-transparent text-xs font-medium rounded bg-white bg-opacity-20 hover:bg-opacity-30 transition-all"
               >
-                <LogOut className="w-4 h-4 mr-2" />
-                <span className="hidden sm:block">Logout</span>
+                <LogOut className="w-3 h-3 xl:w-4 xl:h-4" />
+                <span className="hidden xl:inline ml-1">Logout</span>
               </button>
             </div>
           </div>
