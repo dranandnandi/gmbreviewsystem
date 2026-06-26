@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../store/useStore';
 import { format, isToday, isPast, addDays, isTomorrow } from 'date-fns';
-import { MessageCircle, RefreshCw, Trash2, Filter, Calendar, X, Eye, FileSpreadsheet, Upload, AlertCircle, CheckSquare, Square } from 'lucide-react';
+import { MessageCircle, RefreshCw, Trash2, Filter, Calendar, X, Eye, AlertCircle, CheckSquare, Square, Send } from 'lucide-react';
 import { MessageModal } from '../components/MessageModal';
+import { whatsappApi } from '../services/whatsappApi';
 
 export function SequenceMessagesPage() {
   const { 
@@ -18,8 +19,7 @@ export function SequenceMessagesPage() {
   const [selectedStatus, setSelectedStatus] = useState<string>('');
   const [selectedMessage, setSelectedMessage] = useState<typeof sequenceMessages[0] | null>(null);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
-  const [isExporting, setIsExporting] = useState(false);
-  const [exportError, setExportError] = useState<string>('');
+  const [sendingDirectMessage, setSendingDirectMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (user?.id) {
@@ -116,97 +116,38 @@ export function SequenceMessagesPage() {
     updateSequenceMessageStatus(message.id, 'pending');
   };
 
-  const handleSendToGoogleSheet = async () => {
-    if (!user?.googleSheetId) {
-      setExportError('Please configure your Google Sheet ID in Settings first.');
+  const sendDirectWhatsApp = async (message: typeof sequenceMessages[0]) => {
+    if (!user?.id) {
+      alert('User not authenticated');
       return;
     }
 
-    // Check if Google Apps Script URL is configured
-    const APPS_SCRIPT_URL = user?.googleAppsScriptUrl || '';
-    if (!APPS_SCRIPT_URL) {
-      setExportError('Please configure your Google Apps Script URL in Settings first. Follow the setup guide to deploy your Google Apps Script and get the Web App URL.');
-      return;
-    }
-
-    if (selectedMessageIds.size === 0) {
-      setExportError('Please select at least one message to export.');
-      return;
-    }
-
-    setIsExporting(true);
-    setExportError('');
-
+    setSendingDirectMessage(message.id);
+    
     try {
-      // Get selected messages
-      const selectedMessages = sequenceMessages.filter(message => 
-        selectedMessageIds.has(message.id)
+      await whatsappApi.sendMessage(
+        {
+          phone: message.whatsappNumber,
+          message: message.messageContent,
+        },
+        {
+          userId: user.id,
+          labContext: 'sequence_message'
+        }
       );
 
-      if (selectedMessages.length === 0) {
-        setExportError('No selected messages found.');
-        return;
-      }
-
-      // Prepare payload for Google Apps Script
-      const payload = {
-        googleSheetId: user.googleSheetId,
-        messages: selectedMessages.map(message => ({
-          id: message.id,
-          phoneNumber: message.whatsappNumber,
-          messageContent: message.messageContent,
-          patientName: message.patientName,
-          scheduledDate: message.scheduledDate,
-          status: 'Pending'
-        }))
-      };
-
-      const response = await fetch(APPS_SCRIPT_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'text/plain',
-        },
-        body: JSON.stringify(payload),
-        mode: 'cors'
-      });
-
-      if (!response.ok) {
-        throw new Error(`Google Apps Script returned error: ${response.status} ${response.statusText}`);
-      }
-
-      const result = await response.json();
-      
-      if (result.success) {
-        // Update message statuses to 'sent_to_sheet' for successfully exported messages
-        for (const message of selectedMessages) {
-          updateSequenceMessageStatus(message.id, 'sent_to_sheet');
-        }
-        
-        // Clear selection after successful export
-        setSelectedMessageIds(new Set());
-        
-        alert(`Successfully exported ${selectedMessages.length} messages to Google Sheet!`);
-      } else {
-        throw new Error(result.error || 'Failed to export messages');
-      }
+      await updateSequenceMessageStatus(message.id, 'sent');
+      alert(`Message sent successfully to ${message.patientName}!`);
     } catch (error) {
-      console.error('Error exporting to Google Sheet:', error);
-      
-      let errorMessage = 'Failed to export messages to Google Sheet. ';
-      
-      if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
-        errorMessage += 'Please check that your Google Apps Script URL is correct and the script is properly deployed. Make sure the deployment has "Anyone" access and is set as a Web App.';
-      } else if (error instanceof Error) {
-        errorMessage += error.message;
-      } else {
-        errorMessage += 'Unknown error occurred.';
-      }
-      
-      setExportError(errorMessage);
+      console.error('Error sending direct WhatsApp message:', error);
+      await updateSequenceMessageStatus(message.id, 'failed');
+      alert(`Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
-      setIsExporting(false);
+      setSendingDirectMessage(null);
     }
   };
+
+  
 
   return (
     <div className="space-y-6">
@@ -274,73 +215,17 @@ export function SequenceMessagesPage() {
             <option value="pending">Pending</option>
             <option value="sent">Sent</option>
             <option value="failed">Failed</option>
-            <option value="sent_to_sheet">Sent to Sheet</option>
           </select>
           <p className="mt-1 text-xs text-gray-500">
             {selectedStatus === 'pending' && 'Showing pending messages'}
             {selectedStatus === 'sent' && 'Showing sent messages'}
             {selectedStatus === 'failed' && 'Showing failed messages'}
-            {selectedStatus === 'sent_to_sheet' && 'Showing messages sent to sheet'}
             {!selectedStatus && 'Showing all statuses'}
           </p>
         </div>
       </div>
 
-      {/* Export to Google Sheets Section */}
-      <div className="bg-white p-4 rounded-lg shadow">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-medium text-gray-900 flex items-center">
-              <FileSpreadsheet className="h-5 w-5 mr-2 text-green-600" />
-              Export to Google Sheets
-            </h3>
-            <p className="text-sm text-gray-600 mt-1">
-              Export selected messages to your Google Sheet
-              {selectedMessageIds.size > 0 && (
-                <span className="font-medium text-indigo-600 ml-1">
-                  ({selectedMessageIds.size} selected)
-                </span>
-              )}
-            </p>
-          </div>
-          <button
-            onClick={handleSendToGoogleSheet}
-            disabled={isExporting || !user?.googleSheetId || !user?.googleAppsScriptUrl || selectedMessageIds.size === 0}
-            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Upload className={`h-4 w-4 mr-2 ${isExporting ? 'animate-spin' : ''}`} />
-            {isExporting ? 'Exporting...' : 'Send to Sheet'}
-          </button>
-        </div>
-        
-        {exportError && (
-          <div className="mt-3 rounded-md bg-red-50 p-3">
-            <div className="flex">
-              <AlertCircle className="h-5 w-5 text-red-400 mr-2 flex-shrink-0 mt-0.5" />
-              <div className="text-sm text-red-700">{exportError}</div>
-            </div>
-          </div>
-        )}
-        
-        {(!user?.googleSheetId || !user?.googleAppsScriptUrl) && (
-          <div className="mt-3 rounded-md bg-yellow-50 p-3">
-            <div className="flex">
-              <AlertCircle className="h-5 w-5 text-yellow-400 mr-2 flex-shrink-0 mt-0.5" />
-              <div className="text-sm text-yellow-700">
-                {!user?.googleSheetId && !user?.googleAppsScriptUrl && 
-                  'Please configure your Google Sheet ID and Google Apps Script URL in Settings to enable this feature.'
-                }
-                {!user?.googleSheetId && user?.googleAppsScriptUrl && 
-                  'Please configure your Google Sheet ID in Settings to enable this feature.'
-                }
-                {user?.googleSheetId && !user?.googleAppsScriptUrl && 
-                  'Please configure your Google Apps Script URL in Settings to enable this feature. Follow the setup guide to deploy your script.'
-                }
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+      
 
       <div className="bg-white shadow rounded-lg overflow-hidden">
         <div className="overflow-x-auto -mx-4 sm:mx-0">
@@ -452,12 +337,27 @@ export function SequenceMessagesPage() {
                           <Eye className="h-4 w-4" />
                         </button>
                         {message.status !== 'sent' && (
-                          <button
-                            onClick={() => handleSendMessage(message)}
-                            className="text-indigo-600 hover:text-indigo-900"
-                          >
-                            <MessageCircle className="h-4 w-4" />
-                          </button>
+                          <>
+                            <button
+                              onClick={() => handleSendMessage(message)}
+                              className="text-green-600 hover:text-green-900"
+                              title="Send Manually via WhatsApp"
+                            >
+                              <MessageCircle className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => sendDirectWhatsApp(message)}
+                              disabled={sendingDirectMessage === message.id}
+                              className="text-blue-600 hover:text-blue-900 disabled:opacity-50 disabled:cursor-not-allowed"
+                              title="Send Directly via WhatsApp API"
+                            >
+                              {sendingDirectMessage === message.id ? (
+                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                              ) : (
+                                <Send className="h-4 w-4" />
+                              )}
+                            </button>
+                          </>
                         )}
                         {message.status === 'failed' && (
                           <button

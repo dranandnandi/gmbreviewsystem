@@ -4,6 +4,7 @@ import { useStore } from '../store/useStore';
 import { Users, Calendar, MessageSquare, Clock, Activity, BarChart, FileText, Plus, Send, Star, Home, ArrowRight, TrendingUp, CheckCircle, AlertCircle } from 'lucide-react';
 import { format, isToday, isPast, addDays, isAfter, startOfDay } from 'date-fns';
 import { MessageCard } from '../components/MessageCard';
+import { hasFeature } from '../config/features';
 
 export function DashboardPage() {
   const { 
@@ -43,7 +44,7 @@ export function DashboardPage() {
 
   // Filter stats based on enabled features
   const isFeatureEnabled = (feature: string) => {
-    return user?.enabledFeatures?.includes(feature) ?? false;
+    return hasFeature(user, feature);
   };
 
   const pendingReviews = reviews.filter(r => r.status === 'pending').length;
@@ -115,6 +116,15 @@ export function DashboardPage() {
       link: '/reviews',
       feature: 'reviews'
     },
+    {
+      name: 'Smart Reports',
+      value: reportRequests.length,
+      subtext: `${completedReports} completed, ${pendingReports} pending`,
+      icon: FileText,
+      color: 'bg-orange-500',
+      link: '/reports',
+      feature: 'reports'
+    },
   ];
 
   // Filter stats based on enabled features
@@ -144,6 +154,14 @@ export function DashboardPage() {
       color: 'bg-purple-600 hover:bg-purple-700',
       link: '/quick-send',
       feature: 'sequences'
+    },
+    {
+      name: 'Upload Smart Report',
+      description: 'Create a new report request',
+      icon: FileText,
+      color: 'bg-orange-600 hover:bg-orange-700',
+      link: '/reports',
+      feature: 'reports'
     },
   ].filter(action => !action.feature || isFeatureEnabled(action.feature));
 

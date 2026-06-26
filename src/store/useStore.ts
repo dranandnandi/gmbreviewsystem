@@ -4,6 +4,7 @@ import type { User, Appointment, Review, SequenceMessage, SequenceTemplate, Crea
 import { supabase, executeWithRetry } from '../services/supabaseClient';
 import { defaultReviewRequestTemplates } from '../data/reviewRequestDefaults';
 import { getRandomizedSequenceDays } from '../utils/dateUtils';
+import { getBusinessContextPrompt } from '../utils/businessContext';
 import { addDays, format } from 'date-fns';
 
 // Cache configuration
@@ -89,6 +90,7 @@ interface Store {
   sendMessagesToSheet: (messages: SequenceMessage[]) => Promise<void>;
   // Localized bundles
   prepareLocalizedReviewBundle: (review: Review, language: string, flow: 'ai3' | 'simple1') => Promise<string[]>;
+  prepareSimpleReviewBundle: (review: Review, language: string, flow: 'ai3' | 'simple1') => Promise<string[]>;
   markLocalizedBundleConsumed: (reviewId: string) => Promise<void>;
   deleteReview: (reviewId: string) => Promise<void>;
   
@@ -102,6 +104,11 @@ interface Store {
   addSequenceTemplate: (template: Omit<SequenceTemplate, 'id'>) => Promise<void>;
   queueReviewMessageForSheet: (review: Review, messageType: 'ai_first' | 'ai_second' | 'simple_thank_you' | 'gmb_link') => Promise<SequenceMessage>;
   createBulkSequenceMessages: (reviews: Review[], profileType: string, language: string) => Promise<void>;
+  
+  // Clinic Information Management
+  saveClinicRequest: (data: any) => Promise<void>;
+  fetchClinicRequest: () => Promise<any>;
+  updateClinicInformation: (data: any) => Promise<void>;
 }
 
 export const useStore = create<Store>()(
@@ -532,11 +539,12 @@ export const useStore = create<Store>()(
               contact_whatsapp,
               google_sheet_id,
               google_apps_script_url,
-              blueticks_api_key,
               profile_types,
               languages,
               default_language,
-              enabled_features
+              enabled_features,
+              clinic_keywords,
+              business_context
             `)
             .eq('auth_id', authData.user?.id)
             .single();
@@ -558,11 +566,12 @@ export const useStore = create<Store>()(
             contactWhatsapp: userData.contact_whatsapp,
             googleSheetId: userData.google_sheet_id,
             googleAppsScriptUrl: userData.google_apps_script_url,
-            blueticksApiKey: userData.blueticks_api_key,
             profileTypes: userData.profile_types || [],
             languages: userData.languages,
             defaultLanguage: userData.default_language,
-            enabledFeatures: userData.enabled_features || []
+            enabledFeatures: userData.enabled_features || [],
+            clinicKeywords: userData.clinic_keywords || '[]',
+            businessContext: userData.business_context || null
           };
 
           // Set user data including clinic information
@@ -701,8 +710,9 @@ export const useStore = create<Store>()(
           contact_whatsapp: updates.contactWhatsapp,
           google_sheet_id: updates.googleSheetId,
           google_apps_script_url: updates.googleAppsScriptUrl,
-          blueticks_api_key: updates.blueticksApiKey,
-          enabled_features: updates.enabledFeatures
+          enabled_features: updates.enabledFeatures,
+          clinic_keywords: updates.clinicKeywords,
+          business_context: updates.businessContext
         };
 
         try {
@@ -1344,14 +1354,41 @@ export const useStore = create<Store>()(
               date: new Date(review.appointmentDate).toLocaleDateString(),
               treatment: review.treatment || undefined,
               notes: review.notes || undefined,
+              clinicKeywords: user.clinicKeywords || '[]',
+              businessContext: user.businessContext || null,
+              businessContextPrompt: getBusinessContextPrompt(user.businessContext),
               termsToKeep: [user.clinicName || '', 'MRI', 'CBC', 'X-ray', 'CT', 'ECG'].filter(Boolean)
             }
           };
+          
+          console.log('Invoking generate-review-bundle with body:', body);
+          
           const { data, error } = await executeWithRetry<any>(async () => {
             const res = await supabase.functions.invoke('generate-review-bundle', { body });
             return { data: res.data as any, error: res.error };
           });
+          
+          console.log('Edge function response:', { data, error });
+          
           if (error) throw error;
+          
+          // CRITICAL VALIDATION: Ensure response has valid messages array
+          if (!data || typeof data !== 'object') {
+            throw new Error('Invalid response from edge function: not an object');
+          }
+          
+          if (!Array.isArray(data.messages) || data.messages.length === 0) {
+            console.error('Invalid response structure:', data);
+            throw new Error(`Invalid response: expected messages array, got ${JSON.stringify(data)}`);
+          }
+          
+          // Validate expected message count
+          const expectedCount = flow === 'ai3' ? 3 : 1;
+          if (data.messages.length !== expectedCount) {
+            console.warn(`Expected ${expectedCount} messages for ${flow}, got ${data.messages.length}`);
+          }
+          
+          console.log('Validated bundle with', data.messages.length, 'messages');
 
           // Persist on reviews
           const { error: upErr } = await executeWithRetry<any>(async () => {
@@ -1361,10 +1398,9 @@ export const useStore = create<Store>()(
                 language,
                 localized_message_bundle: data,
                 localized_message_bundle_status: 'prepared',
-                ai_review_text: flow === 'ai3' && Array.isArray((data as any)?.messages) && (data as any).messages[1]
-                  ? (data as any).messages[1]
-                  : (review.aiReviewText || null),
-                has_sequence: flow === 'ai3'
+                ai_review_text: flow === 'ai3' && Array.isArray(data.messages) && data.messages[1]
+                  ? data.messages[1]
+                  : (review.aiReviewText || null)
               })
               .eq('id', review.id)
               .select();
@@ -1377,17 +1413,115 @@ export const useStore = create<Store>()(
             reviews: state.reviews.map(r => r.id === review.id ? {
               ...r,
               language,
-              localizedMessageBundle: data as any,
+              localizedMessageBundle: data,
               localizedMessageBundleStatus: 'prepared',
-              aiReviewText: flow === 'ai3' && Array.isArray((data as any)?.messages) && (data as any).messages[1]
-                ? (data as any).messages[1]
-                : r.aiReviewText,
-              hasSequence: flow === 'ai3'
+              aiReviewText: flow === 'ai3' && Array.isArray(data.messages) && data.messages[1]
+                ? data.messages[1]
+                : r.aiReviewText
             } : r)
           }));
-          return ((data as any)?.messages as string[]) || [];
+          
+          return data.messages as string[];
         } catch (error) {
           console.error('Error preparing localized bundle:', error);
+          throw error;
+        }
+      },
+
+      // NEW: Prepare simplified review bundle using clinic keywords and last 5 reviews
+      prepareSimpleReviewBundle: async (review: Review, language: string, flow: 'ai3' | 'simple1') => {
+        const { user, reviews } = get();
+        if (!user?.id) throw new Error('User not authenticated');
+        
+        try {
+          // Get last 5 AI-generated reviews (only the review text, not full messages)
+          const lastReviews = reviews
+            .filter(r => r.aiReviewText && r.id !== review.id)
+            .slice(0, 5)
+            .map(r => r.aiReviewText)
+            .filter(Boolean);
+
+          const body = {
+            language,
+            flow,
+            context: {
+              patientName: review.patientName,
+              clinicName: user.clinicName || '',
+              clinicAddress: user.clinicAddress || '',
+              gmbLink: user.gmbLink || '',
+              date: new Date(review.appointmentDate).toLocaleDateString(),
+              treatment: review.treatment || undefined,
+              notes: review.notes || undefined,
+              clinicKeywords: user.clinicKeywords || '[]', // JSON string from settings
+              businessContext: user.businessContext || null,
+              businessContextPrompt: getBusinessContextPrompt(user.businessContext)
+            },
+            lastReviews // Last 10 reviews to avoid duplication
+          };
+          
+          console.log('Invoking generate-simple-review with body:', body);
+          
+          const { data, error } = await executeWithRetry<any>(async () => {
+            const res = await supabase.functions.invoke('generate-simple-review', { body });
+            return { data: res.data as any, error: res.error };
+          });
+          
+          console.log('Simple review edge function response:', { data, error });
+          
+          if (error) throw error;
+          
+          // Validate response
+          if (!data || typeof data !== 'object') {
+            throw new Error('Invalid response from edge function: not an object');
+          }
+          
+          if (!Array.isArray(data.messages) || data.messages.length === 0) {
+            console.error('Invalid response structure:', data);
+            throw new Error(`Invalid response: expected messages array, got ${JSON.stringify(data)}`);
+          }
+          
+          // Validate expected message count
+          const expectedCount = flow === 'ai3' ? 3 : 1;
+          if (data.messages.length !== expectedCount) {
+            console.warn(`Expected ${expectedCount} messages for ${flow}, got ${data.messages.length}`);
+          }
+          
+          console.log('Validated simple bundle with', data.messages.length, 'messages');
+
+          // Persist on reviews
+          const { error: upErr } = await executeWithRetry<any>(async () => {
+            const res = await supabase
+              .from('reviews')
+              .update({
+                language,
+                localized_message_bundle: data,
+                localized_message_bundle_status: 'prepared',
+                ai_review_text: flow === 'ai3' && Array.isArray(data.messages) && data.messages[1]
+                  ? data.messages[1]
+                  : (review.aiReviewText || null)
+              })
+              .eq('id', review.id)
+              .select();
+            return { data: res.data as any, error: res.error };
+          });
+          if (upErr) throw upErr;
+
+          // Update local state
+          set((state) => ({
+            reviews: state.reviews.map(r => r.id === review.id ? {
+              ...r,
+              language,
+              localizedMessageBundle: data,
+              localizedMessageBundleStatus: 'prepared',
+              aiReviewText: flow === 'ai3' && Array.isArray(data.messages) && data.messages[1]
+                ? data.messages[1]
+                : r.aiReviewText
+            } : r)
+          }));
+          
+          return data.messages as string[];
+        } catch (error) {
+          console.error('Error preparing simple review bundle:', error);
           throw error;
         }
       },
@@ -1450,7 +1584,9 @@ export const useStore = create<Store>()(
             language,
             profileType,
             clinicName: user.clinicName || '',
-            clinicPhone: user.contactPhone || ''
+            clinicPhone: user.contactPhone || '',
+            clinicKeywords: user.clinicKeywords || '[]',
+            businessContext: user.businessContext || null
           });
           
           // Convert AI templates to full SequenceTemplate objects
@@ -1494,9 +1630,12 @@ export const useStore = create<Store>()(
           }
           
           // Clear AI generated templates after saving
-          set({ aiGeneratedTemplates: [] });
+          set((state) => ({
+            aiGeneratedTemplates: [],
+            cache: { ...state.cache, sequenceTemplates: null }
+          }));
           
-          // Refresh sequence templates
+          // Refresh sequence templates (cache cleared above to force DB re-fetch)
           await get().fetchSequenceTemplates();
         } catch (error) {
           console.error('Error saving AI generated templates:', error);
@@ -1577,6 +1716,8 @@ export const useStore = create<Store>()(
                   doctorName: user.name || '',
                   treatment: review.treatment || 'consultation',
                   date: new Date(review.appointmentDate).toLocaleDateString(),
+                  clinicKeywords: user.clinicKeywords || '[]',
+                  businessContext: user.businessContext || null,
                 });
                 
                 // Save the AI review text to prevent future API calls
@@ -1780,6 +1921,176 @@ Team ${user.clinicName || 'our clinic'}`;
         // Set success message in the store or return it
         if (resultMessage) {
           console.log('Bulk sequence creation result:', resultMessage);
+        }
+      },
+
+      // Clinic Information Management
+      saveClinicRequest: async (data: any) => {
+        // Get current authenticated user from Supabase
+        const { data: { user: supabaseUser }, error: authError } = await supabase.auth.getUser();
+        if (authError || !supabaseUser) {
+          throw new Error('User not authenticated - please log in');
+        }
+        
+        console.log('Saving clinic info for user ID:', supabaseUser.id);
+        console.log('User email:', supabaseUser.email);
+        
+        // Debug: Check if user exists in auth.users
+        try {
+          const { data: userCheck, error: userError } = await supabase
+            .from('auth.users')
+            .select('id')
+            .eq('id', supabaseUser.id)
+            .single();
+          console.log('User exists in auth.users:', !!userCheck, userError?.message);
+        } catch (e) {
+          console.log('Could not check auth.users table:', e);
+        }
+        
+        try {
+          // Check if clinic information already exists
+          const { data: existing, error: fetchError } = await supabase
+            .from('clinic_information')
+            .select('id')
+            .eq('user_id', supabaseUser.id)
+            .single();
+
+          if (fetchError && fetchError.code !== 'PGRST116') {
+            throw fetchError;
+          }
+
+          // Remove any user_id from incoming data and use authenticated user's ID
+          const { user_id: _, ...cleanData } = data;
+          
+          const payload = {
+            user_id: supabaseUser.id, // Always use Supabase authenticated user's ID
+            clinic_name: cleanData.clinic_name || cleanData.clinicName,
+            clinic_address: cleanData.clinic_address || cleanData.fullAddress,
+            clinic_phone: cleanData.clinic_phone || cleanData.mainPhone,
+            clinic_email: cleanData.clinic_email || cleanData.email,
+            clinic_website: cleanData.clinic_website || cleanData.website,
+            gmb_link: cleanData.gmb_link || cleanData.gmbLink,
+            logo_url: cleanData.logo_url || cleanData.logoUrl,
+            primary_color: cleanData.primary_color || cleanData.colorPrimary || '#10B981',
+            secondary_color: cleanData.secondary_color || cleanData.colorSecondary || '#6366F1',
+            business_hours: cleanData.business_hours || cleanData.timings || {},
+            specializations: cleanData.specializations || [cleanData.specialty].filter(Boolean),
+            description: cleanData.description || cleanData.clinicMessage,
+            
+            // Extended fields
+            tagline: cleanData.tagline,
+            affiliations: cleanData.affiliations,
+            languages: cleanData.languages || [],
+            main_phone: cleanData.main_phone || cleanData.mainPhone,
+            emergency_phone: cleanData.emergency_phone || cleanData.emergencyPhone,
+            whatsapp_number: cleanData.whatsapp_number || cleanData.whatsappNumber,
+            social_links: cleanData.social_links || cleanData.socialLinks || {},
+            clinic_display_name: cleanData.clinic_display_name || cleanData.clinicDisplayName,
+            full_address: cleanData.full_address || cleanData.fullAddress,
+            city: cleanData.city,
+            state: cleanData.state,
+            pincode: cleanData.pincode,
+            map_link: cleanData.map_link || cleanData.mapLink,
+            timings: cleanData.timings || {},
+            parking_details: cleanData.parking_details || cleanData.parkingDetails,
+            treatments: cleanData.treatments,
+            health_packages: cleanData.health_packages || cleanData.healthPackages || [],
+            doctors: cleanData.doctors || [],
+            clinic_message: cleanData.clinic_message || cleanData.clinicMessage,
+            blog_link: cleanData.blog_link || cleanData.blogLink,
+            youtube_channel: cleanData.youtube_channel || cleanData.youtubeChannel,
+            articles: cleanData.articles,
+            images: cleanData.images || {},
+            awards: cleanData.awards,
+            memberships: cleanData.memberships,
+            special_facilities: cleanData.special_facilities || cleanData.specialFacilities,
+            is_draft: cleanData.is_draft !== undefined ? cleanData.is_draft : true,
+          };
+
+          let result;
+          if (existing) {
+            // Update existing record
+            const { data: updateData, error: updateError } = await supabase
+              .from('clinic_information')
+              .update(payload)
+              .eq('id', existing.id)
+              .select()
+              .single();
+
+            if (updateError) throw updateError;
+            result = updateData;
+          } else {
+            // Insert new record
+            const { data: insertData, error: insertError } = await supabase
+              .from('clinic_information')
+              .insert(payload)
+              .select()
+              .single();
+
+            if (insertError) throw insertError;
+            result = insertData;
+          }
+
+          console.log('Clinic information saved successfully:', result);
+          return result;
+
+        } catch (error) {
+          console.error('Error saving clinic information:', error);
+          throw error;
+        }
+      },
+
+      fetchClinicRequest: async () => {
+        // Get current authenticated user from Supabase
+        const { data: { user: supabaseUser }, error: authError } = await supabase.auth.getUser();
+        if (authError || !supabaseUser) {
+          throw new Error('User not authenticated - please log in');
+        }
+
+        try {
+          const { data, error } = await supabase
+            .from('clinic_information')
+            .select('*')
+            .eq('user_id', supabaseUser.id)
+            .single();
+
+          if (error && error.code !== 'PGRST116') {
+            throw error;
+          }
+
+          return data;
+        } catch (error) {
+          console.error('Error fetching clinic information:', error);
+          throw error;
+        }
+      },
+
+      updateClinicInformation: async (data: any) => {
+        // Get current authenticated user from Supabase
+        const { data: { user: supabaseUser }, error: authError } = await supabase.auth.getUser();
+        if (authError || !supabaseUser) {
+          throw new Error('User not authenticated - please log in');
+        }
+
+        try {
+          const { data: result, error } = await supabase
+            .from('clinic_information')
+            .update({
+              ...data,
+              updated_at: new Date().toISOString()
+            })
+            .eq('user_id', supabaseUser.id)
+            .select()
+            .single();
+
+          if (error) throw error;
+
+          console.log('Clinic information updated successfully:', result);
+          return result;
+
+        } catch (error) {
+          console.error('Error updating clinic information:', error);
+          throw error;
         }
       },
     }),

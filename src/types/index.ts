@@ -1,8 +1,17 @@
-export type Role = 'admin' | 'receptionist';
+export type Role = 'admin' | 'receptionist' | 'super_admin';
 export type ProfileType = string; // Now allows any custom profile type
 export type SequenceMessageStatus = 'pending' | 'sent' | 'failed';
 export type ReportType = 'smart_report' | 'trend_analysis' | 'longitivity_report';
 export type ReportStatus = 'pending' | 'processing' | 'completed' | 'failed';
+
+export interface BusinessContext {
+  businessType?: string;
+  customerLabel?: string;
+  appointmentLabel?: string;
+  locationLabel?: string;
+  serviceKeywords?: string;
+  promptNotes?: string;
+}
 
 export interface SequenceMessage {
   id: string;
@@ -46,6 +55,8 @@ export interface User {
   languages?: Languages;
   defaultLanguage?: string;
   enabledFeatures?: string[];
+  clinicKeywords?: string; // JSON string array of keywords for review generation
+  businessContext?: BusinessContext | null;
 }
 
 export interface CreativeCategory {

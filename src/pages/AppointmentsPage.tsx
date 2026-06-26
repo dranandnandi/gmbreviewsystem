@@ -6,6 +6,8 @@ import { Send, MessageCircle } from 'lucide-react';
 import { TimePicker } from '../components/TimePicker';
 import { toTitleCase } from '../utils/stringUtils';
 import { EditAppointmentModal } from '../components/EditAppointmentModal';
+import { whatsappApi } from '../services/whatsappApi';
+import { normalizeBusinessContext } from '../utils/businessContext';
 
 export function AppointmentsPage() {
   const { 
@@ -132,6 +134,11 @@ Team ${user?.clinicName || 'our clinic'}`;
   };
 
   const sendDirectWhatsApp = async (appointment: typeof appointments[0]) => {
+    if (!user?.id) {
+      alert('User not authenticated');
+      return;
+    }
+
     setSendingDirectMessage(appointment.id);
     
     try {
@@ -156,29 +163,18 @@ Please arrive 15 minutes before your scheduled time. If you need to reschedule, 
 Best regards,
 Team ${user?.clinicName || 'our clinic'}`;
 
-      const response = await fetch("https://api.blueticks.co/messages", {
-        method: "POST",
-        headers: { 
-          "content-type": "application/json" 
-        },
-        body: JSON.stringify({
-          apiKey: user?.blueticksApiKey,
-          to: `+91${appointment.contactNumber}`,
+      await whatsappApi.sendMessage(
+        {
+          phone: appointment.contactNumber,
           message: message,
-        }),
-      });
+        },
+        {
+          userId: user.id,
+          labContext: 'appointment_confirmation'
+        }
+      );
 
-      if (!user?.blueticksApiKey) {
-        throw new Error('Blueticks API key not configured. Please add your API key in Settings.');
-      }
-
-      if (response.ok) {
-        const result = await response.json();
-        alert(`Message sent successfully to ${appointment.patientName}!`);
-      } else {
-        const error = await response.text();
-        throw new Error(`Failed to send message: ${error}`);
-      }
+      alert(`Message sent successfully to ${appointment.patientName}!`);
     } catch (error) {
       console.error('Error sending direct WhatsApp message:', error);
       alert(`Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -190,6 +186,105 @@ Team ${user?.clinicName || 'our clinic'}`;
   const openEditAppointment = (apt: typeof appointments[0]) => {
     setSelectedAppointmentForEdit(apt);
     setShowEditAppointmentModal(true);
+  };
+
+  const buildModularAppointmentMessage = (
+    appointment: typeof appointments[0],
+    formattedDateTime: string,
+    selectedDoctor?: { id: string; name: string; contactNumber: string }
+  ) => {
+    const context = normalizeBusinessContext(user?.businessContext);
+    const businessName = user?.clinicName || 'our clinic';
+    const hasCustomContext = Boolean(
+      user?.businessContext &&
+      (user.businessContext.businessType ||
+        user.businessContext.customerLabel ||
+        user.businessContext.appointmentLabel ||
+        user.businessContext.locationLabel ||
+        user.businessContext.promptNotes)
+    );
+
+    if (!hasCustomContext) {
+      return `Hello ${appointment.patientName},
+
+Your appointment has been scheduled with ${businessName} for ${formattedDateTime}.
+
+Doctor Details:
+Name: ${selectedDoctor?.name || 'Not assigned'}
+Contact: ${selectedDoctor?.contactNumber || 'Not available'}
+
+Patient Details:
+Address: ${appointment.patientAddress}
+Contact: ${appointment.contactNumber}
+
+Please arrive 15 minutes before your scheduled time. If you need to reschedule, kindly let us know in advance.
+
+Best regards,
+Team ${businessName}`;
+    }
+
+    const customerLabel = context.customerLabel || 'patient';
+    const appointmentLabel = context.appointmentLabel || 'appointment';
+    const locationLabel = context.locationLabel || 'location';
+    const capitalizedCustomerLabel = customerLabel.charAt(0).toUpperCase() + customerLabel.slice(1);
+
+    return `Hello ${appointment.patientName},
+
+Your ${appointmentLabel} with ${businessName} is scheduled for ${formattedDateTime}.
+
+${selectedDoctor?.name ? `Assigned team member:\nName: ${selectedDoctor.name}\nContact: ${selectedDoctor.contactNumber || 'Not available'}\n\n` : ''}${capitalizedCustomerLabel} details:
+${locationLabel}: ${appointment.patientAddress || 'As discussed'}
+Contact: ${appointment.contactNumber}
+
+${appointment.notes ? `Notes: ${appointment.notes}\n\n` : ''}If you need to reschedule or update details, kindly let us know in advance.
+
+Best regards,
+Team ${businessName}`;
+  };
+
+  const generateModularWhatsAppLink = (appointment: typeof appointments[0]) => {
+    const appointmentDateTime = new Date(`${appointment.appointmentDate}T${appointment.appointmentTime}`);
+    const formattedDateTime = format(appointmentDateTime, 'PPp');
+    const selectedDoctor = doctors.find(d => d.id === appointment.doctorId);
+    const message = buildModularAppointmentMessage(appointment, formattedDateTime, selectedDoctor);
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    const baseUrl = isMobile ? 'whatsapp://' : 'https://web.whatsapp.com/';
+    const formattedPhone = `91${appointment.contactNumber}`;
+    return `${baseUrl}send?phone=${formattedPhone}&text=${encodeURIComponent(message)}`;
+  };
+
+  const sendModularDirectWhatsApp = async (appointment: typeof appointments[0]) => {
+    if (!user?.id) {
+      alert('User not authenticated');
+      return;
+    }
+
+    setSendingDirectMessage(appointment.id);
+
+    try {
+      const appointmentDateTime = new Date(`${appointment.appointmentDate}T${appointment.appointmentTime}`);
+      const formattedDateTime = format(appointmentDateTime, 'PPp');
+      const selectedDoctor = doctors.find(d => d.id === appointment.doctorId);
+      const message = buildModularAppointmentMessage(appointment, formattedDateTime, selectedDoctor);
+
+      await whatsappApi.sendMessage(
+        {
+          phone: appointment.contactNumber,
+          message,
+        },
+        {
+          userId: user.id,
+          labContext: 'appointment_confirmation'
+        }
+      );
+
+      alert(`Message sent successfully to ${appointment.patientName}!`);
+    } catch (error) {
+      console.error('Error sending direct WhatsApp message:', error);
+      alert(`Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setSendingDirectMessage(null);
+    }
   };
   const handleSaveAppointmentEdits = async (id: string, updates: any) => {
     try {
@@ -382,7 +477,7 @@ Team ${user?.clinicName || 'our clinic'}`;
                       </select>
                       <div className="flex space-x-2">
                         <a
-                          href={generateWhatsAppLink(appointment)}
+                          href={generateModularWhatsAppLink(appointment)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex items-center px-3 py-1 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 transition-colors"
@@ -391,10 +486,10 @@ Team ${user?.clinicName || 'our clinic'}`;
                           Send Manually
                         </a>
                         <button
-                          onClick={() => sendDirectWhatsApp(appointment)}
-                          disabled={sendingDirectMessage === appointment.id || !user?.blueticksApiKey}
+                          onClick={() => sendModularDirectWhatsApp(appointment)}
+                          disabled={sendingDirectMessage === appointment.id}
                           className="inline-flex items-center px-3 py-1 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                          title={!user?.blueticksApiKey ? 'Configure Blueticks API key in Settings first' : 'Send message directly via Blueticks API'}
+                          title="Send message directly via WhatsApp"
                         >
                           {sendingDirectMessage === appointment.id ? (
                             <>

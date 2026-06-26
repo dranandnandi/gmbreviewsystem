@@ -12,7 +12,13 @@ import { SimplifiedSequenceMessagesPage } from './pages/SimplifiedSequenceMessag
 import { AISequenceTemplateGeneratorPage } from './pages/AISequenceTemplateGeneratorPage';
 import ClinicInformationPage from './pages/ClinicInformationPage';
 import { AdminPage } from './pages/AdminPage';
+import { SmartReportsPage } from './pages/SmartReportsPage';
+import { SuperAdminPage } from './pages/SuperAdminPage';
+import { ProductCatalogPage } from './pages/ProductCatalogPage';
+import { ProductLandingPage } from './pages/ProductLandingPage';
+import { ProductWorkspacePage } from './pages/ProductWorkspacePage';
 import { useStore } from './store/useStore';
+import { hasFeature, isAdminRole, isSuperAdminRole } from './config/features';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user } = useStore();
@@ -23,14 +29,21 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function AdminRoute({ children }: { children: React.ReactNode }) {
   const { user } = useStore();
   if (!user) return <Navigate to="/login" />;
-  if (user.role !== 'admin') return <Navigate to="/" />;
+  if (!isAdminRole(user.role)) return <Navigate to="/" />;
+  return <>{children}</>;
+}
+
+function SuperAdminRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useStore();
+  if (!user) return <Navigate to="/login" />;
+  if (!isSuperAdminRole(user.role)) return <Navigate to="/" />;
   return <>{children}</>;
 }
 
 function FeatureRoute({ children, feature }: { children: React.ReactNode; feature: string }) {
   const { user } = useStore();
   if (!user) return <Navigate to="/login" />;
-  if (!user.enabledFeatures?.includes(feature)) return <Navigate to="/" />;
+  if (!hasFeature(user, feature)) return <Navigate to="/" />;
   return <>{children}</>;
 }
 
@@ -38,6 +51,13 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/products/:productSlug" element={<ProductLandingPage />} />
+        <Route path="/review-booster" element={<ProductLandingPage />} />
+        <Route path="/appointment-reminder" element={<ProductLandingPage />} />
+        <Route path="/sequence-sender" element={<ProductLandingPage />} />
+        <Route path="/smart-reports" element={<ProductLandingPage />} />
+        <Route path="/marketing-creatives" element={<ProductLandingPage />} />
+        <Route path="/clinic-growth-suite" element={<ProductLandingPage />} />
         <Route path="/" element={<Layout />}>
           <Route path="login" element={<LoginPage />} />
           <Route
@@ -45,6 +65,22 @@ function App() {
             element={
               <ProtectedRoute>
                 <DashboardPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="products"
+            element={
+              <ProtectedRoute>
+                <ProductCatalogPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="workspace/:productSlug"
+            element={
+              <ProtectedRoute>
+                <ProductWorkspacePage />
               </ProtectedRoute>
             }
           />
@@ -109,6 +145,16 @@ function App() {
             }
           />
           <Route
+            path="reports"
+            element={
+              <ProtectedRoute>
+                <FeatureRoute feature="reports">
+                  <SmartReportsPage />
+                </FeatureRoute>
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="clinic-information"
             element={
               <ProtectedRoute>
@@ -122,6 +168,14 @@ function App() {
               <AdminRoute>
                 <AdminPage />
               </AdminRoute>
+            }
+          />
+          <Route
+            path="super-admin"
+            element={
+              <SuperAdminRoute>
+                <SuperAdminPage />
+              </SuperAdminRoute>
             }
           />
           <Route

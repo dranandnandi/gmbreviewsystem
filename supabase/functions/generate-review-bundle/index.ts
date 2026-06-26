@@ -110,9 +110,15 @@ function safeParseJsonMessages(text: string): string[] | null {
 async function callGeminiJSON(
   modelCandidates: string[],
   userParts: { text: string }[],
-  systemText?: string
+  systemText?: string,
+  randomize?: boolean
 ): Promise<{ text: string; modelUsed: string }> {
   if (!GOOGLE_API_KEY) throw new Error('Missing ALLGOOGLE_KEY secret');
+
+  // Add randomization for variation
+  const temperature = randomize ? 0.7 + Math.random() * 0.5 : 0.1; // 0.7-1.2 when randomized
+  const topK = randomize ? 30 + Math.floor(Math.random() * 30) : 40; // 30-60 when randomized
+  const topP = randomize ? 0.85 + Math.random() * 0.1 : 0.9; // 0.85-0.95 when randomized
 
   let lastErr: string | null = null;
   for (const model of modelCandidates) {
@@ -122,9 +128,9 @@ async function callGeminiJSON(
         contents: [{ role: 'user', parts: userParts }],
         generationConfig: {
           response_mime_type: 'application/json',
-          temperature: 0.1, // keep it deterministic
-          topK: 40,
-          topP: 0.9
+          temperature,
+          topK,
+          topP
         }
       };
       if (systemText) {
@@ -175,6 +181,71 @@ async function callGeminiJSON(
  * message[2]: ONLY the Google review link (no extra words)
  */
 
+// Helper function to combine all visit context fields
+function buildCombinedTreatmentContext(context: any): string {
+  const parts: string[] = [];
+  
+  if (context.treatment) parts.push(`came for ${context.treatment}`);
+  if (context.notes) parts.push(context.notes);
+  if (context.symptoms) parts.push(`symptoms: ${context.symptoms}`);
+  if (context.treatmentNotes) parts.push(context.treatmentNotes);
+  if (context.businessContextPrompt) parts.push(context.businessContextPrompt);
+  if (context.businessContext?.businessType) parts.push(`business type: ${context.businessContext.businessType}`);
+  if (context.businessContext?.customerLabel) parts.push(`customer label: ${context.businessContext.customerLabel}`);
+  if (context.businessContext?.appointmentLabel) parts.push(`interaction type: ${context.businessContext.appointmentLabel}`);
+  if (context.businessContext?.locationLabel) parts.push(`service mode/location: ${context.businessContext.locationLabel}`);
+  if (context.businessContext?.serviceKeywords) parts.push(`service keywords: ${context.businessContext.serviceKeywords}`);
+  if (context.businessContext?.promptNotes) parts.push(context.businessContext.promptNotes);
+  if (context.clinicKeywords) parts.push(`available keywords: ${context.clinicKeywords}`);
+  
+  return parts.length > 0 ? parts.join('. ') : 'came for routine tests and checkup';
+}
+
+// Enhanced prompt builder that forces use of context and avoids clichés
+function buildEnhancedReviewPrompt(lang: string, clinicName: string, patientName: string, treatmentContext: string, uniqueSeed: number): string {
+  const langName = LANGUAGE_NAMES[lang] || 'English';
+  
+  // Random opening patterns for variation
+  const openingPatterns = [
+    'Start with the reason for visit',
+    'Start with the clinic name',
+    'Start with what happened during the visit',
+    'Start with the service received'
+  ];
+  const selectedOpening = openingPatterns[uniqueSeed % openingPatterns.length];
+  
+  return `Write a positive Google review in ${langName} for ${clinicName}.
+
+Visit context (use this, don't invent new details):
+${treatmentContext}
+
+Requirements:
+- Write as the patient describing their own visit.
+- Respect any configured business labels and service mode in the context. If it says lab, home visit, phone call, video consultation, insurance agency, client, or policyholder, use that wording and avoid unrelated doctor/clinic assumptions.
+- Clearly mention:
+  - why they came (e.g. fever, routine checkup),
+  - and any specific service mentioned above (e.g. X-ray) if it appears in the context.
+- Do NOT mention any test or procedure that is NOT in the visit context.
+- Length: 2–3 sentences.
+- Include appreciation for staff professionalism in your own words.
+- Use simple, conversational language, like a normal person speaking.
+
+AVOID these generic marketing phrases:
+- "great experience", "excellent service", "highly recommend"
+- "very professional", "top-notch", "incredibly professional"
+- "outstanding", "exceptional", "world-class"
+
+Instead use everyday wording like:
+- "really happy", "felt comfortable", "they explained everything clearly"
+- "made it easy", "no issues", "went smoothly", "got what I needed"
+
+Variation rule (${selectedOpening}):
+- Vary how you start the review. You can use contractions (I'm, don't, can't) to sound natural.
+- Use different sentence structures each time.
+
+Write ONE review that sounds natural and uses details from the visit context. Uniqueness seed: ${uniqueSeed}`;
+}
+
 function buildSystemInstruction(langCode: string, termsToKeep: string[], clinicName?: string): string {
   const targetName = LANGUAGE_NAMES[langCode] || 'English';
   const keepList = mergedLatinWhitelist(langCode, termsToKeep);
@@ -204,14 +275,31 @@ function buildGenUserPrompt(input: any): string {
   const clinicAddress = p.clinicAddress || '';
   const date = p.date || '';
   const gmbLink = p.gmbLink || '';
+  const treatment = p.treatment || '';
+  const notes = p.notes || '';
   const flow = input.flow || 'ai3';
+  
+  // Add unique seed based on timestamp to ensure variation
+  const uniqueSeed = Date.now();
+  
+  // Generate random tone variation
+  const tones = ['professional and warm', 'friendly and caring', 'grateful and respectful', 'appreciative and sincere'];
+  const selectedTone = tones[uniqueSeed % tones.length];
 
   if (flow === 'simple1') {
     // Simple Thank You - Single message with GMB link
+    // Build combined treatment context from all fields
+    const combinedTreatmentContext = buildCombinedTreatmentContext(p);
+    
     return `TASK: Generate a single WhatsApp-friendly patient thank you message in a MIXED style:
 - Sentences in ${targetName} (${langCode}) native script.
 - Keep the following in ENGLISH (Latin) exactly: ${keepTerms}.
 - Maintain the EXACT format and line breaks shown below.
+- Use a ${selectedTone} tone.
+- Uniqueness seed: ${uniqueSeed}
+
+Context for personalization (use all these details):
+${combinedTreatmentContext}
 
 REQUIRED OUTPUT (JSON only): {"messages": string[]}
 
@@ -237,15 +325,25 @@ Note:
 - Do NOT translate the clinic name or URLs.
 - Do NOT add any extra lines above/below this block.
 - Return ONLY ONE message in the array.
+- Vary the phrasing slightly while maintaining the structure and ${selectedTone} tone.
+- Reference the actual visit details: ${combinedTreatmentContext}
 
 Return ONLY the JSON object with {"messages": ["single_message_here"]}.`;
   }
 
-  // AI3 flow - 3 messages format
+  // AI3 flow - 3 messages format with enhanced variation
+  // Build combined treatment context from all fields
+  const combinedTreatmentContext = buildCombinedTreatmentContext(p);
+  
+  // Use enhanced prompt for review generation
+  const enhancedReviewInstructions = buildEnhancedReviewPrompt(langCode, clinicName, patientName, combinedTreatmentContext, uniqueSeed);
+  
   return `TASK: Generate WhatsApp-friendly patient review messages in a MIXED style:
 - Sentences in ${targetName} (${langCode}) native script.
 - Keep the following in ENGLISH (Latin) exactly: ${keepTerms}.
 - Maintain the EXACT format and line breaks shown below.
+- Use a ${selectedTone} tone throughout.
+- Uniqueness seed: ${uniqueSeed}
 
 REQUIRED OUTPUT (JSON only): {"messages": string[]}
 
@@ -271,16 +369,28 @@ Note:
 - Do NOT translate the clinic name or URLs.
 - Do NOT add any extra lines above/below this block.
 
-messages[1]:
-- ONLY the sample review text (no greeting, no footer, no link).
-- 1–3 sentences max, mixed style (local script + protected English words).
-- Keep ${clinicName} as-is (Latin).
+messages[1] - REVIEW TEXT GENERATION:
+Follow these instructions exactly:
+
+${enhancedReviewInstructions}
+
+IMPORTANT Anti-Cliché Rules:
+- NEVER use: "great experience", "excellent service", "highly recommend", "incredibly professional"
+- NEVER use: "outstanding", "exceptional", "world-class", "top-notch"
+- Instead say things like: "really happy with", "felt comfortable", "made it easy", "went smoothly"
+- Use conversational tone like a real person talking, not marketing copy.
+
+Variation Requirements:
+- Each review must have different opening and sentence structure
+- Use contractions naturally (I'm, don't, can't, it's)
+- Mention specific details from context: ${combinedTreatmentContext}
+- Focus on one or two specific aspects (not everything at once)
 
 messages[2]:
 - ONLY the Google review link: ${gmbLink}
 - No extra text/words/emojis around it.
 
-Return ONLY the JSON object with {"messages": [...]}.`;
+Return ONLY the JSON object with {"messages": [...]}. Ensure variety in phrasing for message[1] using seed ${uniqueSeed}.`;
 }
 
 function buildTranslateUserPrompt(messages: string[], langCode: string, termsToKeep: string[], context: any, flow?: string): string {
@@ -360,7 +470,7 @@ async function translateOnce(
 ): Promise<{ messages: string[] | null; model?: string; raw?: string }> {
   const system = buildSystemInstruction(lang, termsToKeep, context?.clinicName);
   const user = buildTranslateUserPrompt(original, lang, termsToKeep, context, flow);
-  const { text, modelUsed } = await callGeminiJSON(TX_MODELS, [{ text: user }], system);
+  const { text, modelUsed } = await callGeminiJSON(TX_MODELS, [{ text: user }], system, false);
   const parsed = safeParseJsonMessages(text);
   return { messages: parsed, model: modelUsed, raw: text };
 }
@@ -370,7 +480,8 @@ async function generateOnce(
 ): Promise<{ messages: string[] | null; model?: string; raw?: string }> {
   const system = buildSystemInstruction(input.language, input.context?.termsToKeep || [], input.context?.clinicName);
   const user = buildGenUserPrompt(input);
-  const { text, modelUsed } = await callGeminiJSON(GEN_MODELS, [{ text: user }], system);
+  // Enable randomization for generation to add variation
+  const { text, modelUsed } = await callGeminiJSON(GEN_MODELS, [{ text: user }], system, true);
   const parsed = safeParseJsonMessages(text);
   return { messages: parsed, model: modelUsed, raw: text };
 }

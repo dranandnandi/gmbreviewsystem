@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 import { Building, Save, UserPlus, Users, Phone } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
+import { WhatsAppConnectionCard } from '../components/WhatsApp/WhatsAppConnectionCard';
+import { compactBusinessContext, normalizeBusinessContext } from '../utils/businessContext';
 
 const LANGUAGE_NAMES = {
   en: 'English',
@@ -13,14 +15,11 @@ const LANGUAGE_NAMES = {
 export function SettingsPage() {
   // Temporary feature flag to hide Direct WhatsApp Integration section
   const SHOW_WHATSAPP_INTEGRATION = false; // set true when ready to enable again
-  const SHOW_GOOGLE_SHEETS_INTEGRATION = false; // feature flag to hide Google Sheets section temporarily
   const SHOW_LANGUAGE_INFORMATION = false; // hide language info section temporarily
   const { user, updateUser } = useStore();
   const [error, setError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [showBlueticks, setShowBlueticks] = useState(false);
-  const [showGoogleSheetId, setShowGoogleSheetId] = useState(false);
-  const [showGoogleAppsScriptUrl, setShowGoogleAppsScriptUrl] = useState(false);
   const [doctors, setDoctors] = useState<Array<{
     id: string;
     name: string;
@@ -41,9 +40,8 @@ export function SettingsPage() {
     contactPhone: user?.contactPhone || '',
     contactEmail: user?.contactEmail || '',
     contactWhatsapp: user?.contactWhatsapp || '',
-    googleSheetId: user?.googleSheetId || '',
-    googleAppsScriptUrl: user?.googleAppsScriptUrl || '',
-    blueticksApiKey: user?.blueticksApiKey || ''
+    clinicKeywords: user?.clinicKeywords || '',
+    businessContext: normalizeBusinessContext(user?.businessContext)
   });
 
   useEffect(() => {
@@ -57,9 +55,8 @@ export function SettingsPage() {
         contactPhone: user.contactPhone || '',
         contactEmail: user.contactEmail || '',
         contactWhatsapp: user.contactWhatsapp || '',
-        googleSheetId: user.googleSheetId || '',
-        googleAppsScriptUrl: user.googleAppsScriptUrl || '',
-        blueticksApiKey: user.blueticksApiKey || ''
+        clinicKeywords: user.clinicKeywords || '',
+        businessContext: normalizeBusinessContext(user.businessContext)
       });
     }
   }, [user]);
@@ -141,7 +138,10 @@ export function SettingsPage() {
   const handleSaveSettings = async () => {
     setIsSaving(true);
     try {
-      await updateUser(editableSettings);
+      await updateUser({
+        ...editableSettings,
+        businessContext: compactBusinessContext(editableSettings.businessContext)
+      });
       setError('');
     } catch (error) {
       console.error('Error updating settings:', error);
@@ -360,79 +360,10 @@ export function SettingsPage() {
             </div>
           </div>
 
-          {/* Google Sheets Integration (hidden via feature flag) */}
-          {SHOW_GOOGLE_SHEETS_INTEGRATION && (
-            <div>
-              <h3 className="text-lg font-medium text-gray-900 mb-4">Google Sheets Integration</h3>
-              <div className="grid grid-cols-1 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Google Sheet ID</label>
-                  <div className="mt-1 relative">
-                    <input
-                      type={showGoogleSheetId ? "text" : "password"}
-                      className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 pr-10"
-                      value={editableSettings.googleSheetId}
-                      onChange={(e) => setEditableSettings({ ...editableSettings, googleSheetId: e.target.value })}
-                      placeholder={editableSettings.googleSheetId ? "••••••••••••••••••••••••••••••••" : "Enter your Google Sheet ID from the URL"}
-                    />
-                    <button
-                      type="button"
-                      className="absolute inset-y-0 right-0 pr-3 flex items-center"
-                      onClick={() => setShowGoogleSheetId(!showGoogleSheetId)}
-                    >
-                      {showGoogleSheetId ? (
-                        <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21" />
-                        </svg>
-                      ) : (
-                        <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268-2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                        </svg>
-                      )}
-                    </button>
-                  </div>
-                  <p className="mt-1 text-sm text-gray-500">
-                    Copy the Sheet ID from your Google Sheet URL: https://docs.google.com/spreadsheets/d/<strong>SHEET_ID</strong>/edit
-                  </p>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Google Apps Script URL</label>
-                  <div className="mt-1 relative">
-                    <input
-                      type={showGoogleAppsScriptUrl ? "url" : "password"}
-                      className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 pr-10"
-                      value={editableSettings.googleAppsScriptUrl}
-                      onChange={(e) => setEditableSettings({ ...editableSettings, googleAppsScriptUrl: e.target.value })}
-                      placeholder={editableSettings.googleAppsScriptUrl ? "••••••••••••••••••••••••••••••••" : "https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec"}
-                    />
-                    <button
-                      type="button"
-                      className="absolute inset-y-0 right-0 pr-3 flex items-center"
-                      onClick={() => setShowGoogleAppsScriptUrl(!showGoogleAppsScriptUrl)}
-                    >
-                      {showGoogleAppsScriptUrl ? (
-                        <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21" />
-                        </svg>
-                      ) : (
-                        <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268-2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                        </svg>
-                      )}
-                    </button>
-                  </div>
-                  <p className="mt-1 text-sm text-gray-500">
-                    Deploy your Google Apps Script as a Web App and paste the Web App URL here. 
-                    <br />
-                    <strong>Format:</strong> https://script.google.com/macros/s/SCRIPT_ID/exec
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
+          {/* WhatsApp Backend Connection */}
+          <div>
+            <WhatsAppConnectionCard />
+          </div>
 
           {/* Direct WhatsApp Integration (Hidden via feature flag) */}
           {SHOW_WHATSAPP_INTEGRATION && (
@@ -484,6 +415,114 @@ export function SettingsPage() {
               value={editableSettings.gmbLink}
               onChange={(e) => setEditableSettings({ ...editableSettings, gmbLink: e.target.value })}
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700">
+              Clinic Keywords (for AI Review Generation)
+            </label>
+            <textarea
+              className="mt-1 block w-full rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+              rows={3}
+              value={editableSettings.clinicKeywords || ''}
+              onChange={(e) => setEditableSettings({ ...editableSettings, clinicKeywords: e.target.value })}
+              placeholder='["MRI", "CBC", "X-ray", "CT Scan", "ECG", "Blood Test", "Pathology"]'
+            />
+            <p className="mt-1 text-sm text-gray-500">
+              JSON array of medical services/tests your clinic offers. Used to generate more relevant reviews.
+            </p>
+          </div>
+
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <h3 className="text-lg font-medium text-gray-900 mb-2">Business Prompt Context</h3>
+            <p className="mb-4 text-sm text-gray-600">
+              Optional. Leave blank to keep existing clinic/patient/appointment wording.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Business Type</label>
+                <input
+                  type="text"
+                  className="mt-1 block w-full rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                  value={editableSettings.businessContext.businessType}
+                  onChange={(e) => setEditableSettings({
+                    ...editableSettings,
+                    businessContext: { ...editableSettings.businessContext, businessType: e.target.value }
+                  })}
+                  placeholder="Clinic, diagnostic lab, insurance agency"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Customer Label</label>
+                <input
+                  type="text"
+                  className="mt-1 block w-full rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                  value={editableSettings.businessContext.customerLabel}
+                  onChange={(e) => setEditableSettings({
+                    ...editableSettings,
+                    businessContext: { ...editableSettings.businessContext, customerLabel: e.target.value }
+                  })}
+                  placeholder="patient, client, policyholder"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Booking / Interaction Label</label>
+                <input
+                  type="text"
+                  className="mt-1 block w-full rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                  value={editableSettings.businessContext.appointmentLabel}
+                  onChange={(e) => setEditableSettings({
+                    ...editableSettings,
+                    businessContext: { ...editableSettings.businessContext, appointmentLabel: e.target.value }
+                  })}
+                  placeholder="appointment, home visit, phone call, video consultation"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Location / Mode Label</label>
+                <input
+                  type="text"
+                  className="mt-1 block w-full rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                  value={editableSettings.businessContext.locationLabel}
+                  onChange={(e) => setEditableSettings({
+                    ...editableSettings,
+                    businessContext: { ...editableSettings.businessContext, locationLabel: e.target.value }
+                  })}
+                  placeholder="center, home, phone, video call"
+                />
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <label className="block text-sm font-medium text-gray-700">Service Keywords</label>
+              <textarea
+                className="mt-1 block w-full rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                rows={2}
+                value={editableSettings.businessContext.serviceKeywords}
+                onChange={(e) => setEditableSettings({
+                  ...editableSettings,
+                  businessContext: { ...editableSettings.businessContext, serviceKeywords: e.target.value }
+                })}
+                placeholder="CBC, ECG, home sample collection, claim consultation, renewal call"
+              />
+            </div>
+
+            <div className="mt-4">
+              <label className="block text-sm font-medium text-gray-700">Prompt Notes</label>
+              <textarea
+                className="mt-1 block w-full rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                rows={2}
+                value={editableSettings.businessContext.promptNotes}
+                onChange={(e) => setEditableSettings({
+                  ...editableSettings,
+                  businessContext: { ...editableSettings.businessContext, promptNotes: e.target.value }
+                })}
+                placeholder="Avoid doctor wording. Mention home sample collection. For insurance, use client and consultation language."
+              />
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">

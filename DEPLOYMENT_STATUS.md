@@ -2,7 +2,7 @@
 
 **Date**: November 5, 2025  
 **Project**: GMB Review System (clinic-management-system)  
-**Status**: ✅ **NOT DIRECTLY LINKED TO NETLIFY** (Ready for deployment)
+**Status**: ✅ **LINKED TO NETLIFY** (Site ID: `e19415cf-a9ca-4a3a-a6d7-61b8f41b4774`)
 
 ---
 
@@ -12,11 +12,11 @@
 - **Remote URL**: `https://github.com/dranandnandi/gmbreviewsystem.git`
 - **Current Branch**: `feat/multilang-localized-bundle`
 - **Repository Owner**: @dranandnandi
-- **Hosting Status**: GitHub repository only (no CI/CD pipeline configured)
+- **Hosting Status**: GitHub repository connected; Netlify linkage stored locally
 
 ### Netlify Configuration Files
 - ✅ **netlify.toml** - Present and configured
-- ❌ **.netlify/** - Not present (not deployed yet)
+- ✅ **.netlify/** - Present (`state.json` linked to site)
 - ❌ **GitHub Actions Workflow** - Not configured for Netlify deployment
 
 ---
@@ -37,6 +37,7 @@
 - **Publish Directory**: `dist/`
 - **Node.js Version**: 18
 - **Environment**: Development/Test
+- **Linked Site ID**: `e19415cf-a9ca-4a3a-a6d7-61b8f41b4774`
 
 ### Security Headers Configured
 - X-Frame-Options: DENY

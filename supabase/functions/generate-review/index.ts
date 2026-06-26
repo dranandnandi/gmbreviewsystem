@@ -40,6 +40,29 @@ function pickQualities(n = 2) {
 function sanitize(str: string) {
   return str.replace(/[`"'<>]/g, '').trim();
 }
+
+function parseKeywords(value: any): string[] {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.map(String).filter(Boolean);
+  try {
+    const parsed = JSON.parse(String(value));
+    return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : [];
+  } catch {
+    return String(value).split(',').map((item) => item.trim()).filter(Boolean);
+  }
+}
+
+function buildBusinessContextLines(context: any, keywords: string[]): string {
+  const lines: string[] = [];
+  if (context?.businessType) lines.push(`Business type: ${sanitize(String(context.businessType))}`);
+  if (context?.customerLabel) lines.push(`Customer label: ${sanitize(String(context.customerLabel))}`);
+  if (context?.appointmentLabel) lines.push(`Interaction type: ${sanitize(String(context.appointmentLabel))}`);
+  if (context?.locationLabel) lines.push(`Service mode/location: ${sanitize(String(context.locationLabel))}`);
+  if (keywords.length) lines.push(`Relevant service keywords: ${keywords.map(sanitize).join(', ')}`);
+  if (context?.serviceKeywords) lines.push(`Additional service keywords: ${sanitize(String(context.serviceKeywords))}`);
+  if (context?.promptNotes) lines.push(`Writing guidance: ${sanitize(String(context.promptNotes))}`);
+  return lines.join('\n');
+}
 Deno.serve(async (req: Request)=>{
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
@@ -107,6 +130,8 @@ Deno.serve(async (req: Request)=>{
   const maxWords = Math.min(Math.max(body.maxWords || 55, 35), 80);
   const seedHint = body.seedPatientHint ? sanitize(body.seedPatientHint) : '';
   const qualities = pickQualities();
+  const keywordList = parseKeywords(body.clinicKeywords);
+  const businessContextBlock = buildBusinessContextLines(body.businessContext, keywordList);
   const prompt = `
 You are generating a brief, authentic patient review.
 
@@ -117,6 +142,7 @@ REQUIRED:
 - Reference timing (e.g. “today”, “recently”, or date ${visitDate}).
 - Naturally weave in: ${qualities.join(', ')}.
 ${seedHint ? `- Extra context: ${seedHint}` : ''}
+${businessContextBlock ? `\nBUSINESS CONTEXT:\n${businessContextBlock}\n- Use this context to avoid wrong wording. Use configured labels such as client, home visit, phone call, video consultation, or agency when provided.` : ''}
 
 STYLE:
 - Tone: ${tone}.

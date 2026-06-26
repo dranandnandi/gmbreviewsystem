@@ -12,6 +12,14 @@
   # Set Node.js version for the build
   NODE_VERSION = "18"
 
+[functions]
+  # Directory where your Netlify Functions are located
+  directory = "netlify/functions"
+  # Set Node.js version for functions
+  node_bundler = "esbuild"
+  # Include .ts files
+  included_files = ["netlify/functions/**/*.ts"]
+
 [[headers]]
   # Define which paths this specific [[headers]] block will cover
   for = "/*"

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 import { Shield, Users, Settings as SettingsIcon, Save, Check, X, UserCheck, Plus, Trash2 } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
+import { ADMIN_FEATURES, isAdminRole } from '../config/features';
 
 interface UserWithFeatures {
   id: string;
@@ -11,14 +12,6 @@ interface UserWithFeatures {
   enabled_features: string[];
   profile_types: string[];
 }
-
-const AVAILABLE_FEATURES = [
-  { id: 'dashboard', name: 'Dashboard', description: 'Main dashboard with overview and statistics' },
-  { id: 'appointments', name: 'Appointments', description: 'Schedule and manage patient appointments' },
-  { id: 'reviews', name: 'Reviews', description: 'Manage patient reviews and feedback requests' },
-  { id: 'sequences', name: 'Sequence Messages', description: 'Automated follow-up message sequences' },
-  { id: 'creatives', name: 'Your Creatives', description: 'Access to creative content and materials' },
-];
 
 const AVAILABLE_PROFILE_TYPES = [
   'General Practice',
@@ -34,7 +27,7 @@ const AVAILABLE_PROFILE_TYPES = [
 ];
 
 export function AdminPage() {
-  const { user, updateUserFeatures } = useStore();
+  const { user, updateUserFeatures, setUser } = useStore();
   const [users, setUsers] = useState<UserWithFeatures[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
@@ -196,9 +189,8 @@ export function AdminPage() {
       if (error) throw error;
 
       // Update current user if it's the same user
-      const { user } = get();
       if (user?.id === userId) {
-        set({ user: { ...user, profileTypes: profileTypes } });
+        setUser({ ...user, profileTypes });
       }
     } catch (error) {
       console.error('Error updating user profile types:', error);
@@ -206,7 +198,7 @@ export function AdminPage() {
     }
   };
 
-  if (user?.role !== 'admin') {
+  if (!isAdminRole(user?.role)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
@@ -310,7 +302,7 @@ export function AdminPage() {
                     </td>
                     <td className="px-6 py-4">
                       <div className="space-y-2">
-                        {AVAILABLE_FEATURES.map((feature) => (
+                        {ADMIN_FEATURES.map((feature) => (
                           <label key={feature.id} className="flex items-center">
                             <input
                               type="checkbox"
@@ -405,7 +397,7 @@ export function AdminPage() {
                         <button
                           onClick={() => handleBulkFeatureUpdate(
                             userData.id, 
-                            AVAILABLE_FEATURES.map(f => f.id)
+                            ADMIN_FEATURES.map(f => f.id)
                           )}
                           disabled={saving === userData.id}
                           className="inline-flex items-center px-3 py-1 border border-transparent text-xs font-medium rounded text-white bg-green-600 hover:bg-green-700 disabled:opacity-50"
@@ -475,7 +467,7 @@ export function AdminPage() {
         </div>
         <div className="p-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {AVAILABLE_FEATURES.map((feature) => (
+            {ADMIN_FEATURES.map((feature) => (
               <div key={feature.id} className="border rounded-lg p-4">
                 <h3 className="font-medium text-gray-900">{feature.name}</h3>
                 <p className="text-sm text-gray-600 mt-1">{feature.description}</p>

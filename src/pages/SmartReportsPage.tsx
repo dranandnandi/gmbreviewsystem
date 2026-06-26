@@ -50,6 +50,7 @@ export function SmartReportsPage() {
     reportRequests, 
     addReportRequest, 
     updateReportRequest, 
+    fetchReportRequests,
     lazyLoadReportRequests,
     isLoadingReportRequests
   } = useStore();

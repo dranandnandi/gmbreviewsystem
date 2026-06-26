@@ -25,13 +25,6 @@ export function ReviewActionsDropdown({
   onEditReview,
   onDeleteReview
 }: ReviewActionsDropdownProps) {
-  // Add logging for props
-  console.log('[REVIEW ACTIONS DROPDOWN] Props received:', {
-    reviewId: review.id,
-    patientName: review.patientName,
-    isLoadingTemplates,
-    hasTemplates
-  });
   
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);

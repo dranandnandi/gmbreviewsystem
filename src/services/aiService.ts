@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { supabase } from './supabaseClient';
+import type { BusinessContext } from '../types';
 
 // (Legacy) Clinic qualities + random selection removed from client since review generation moved server-side.
 
@@ -12,6 +13,8 @@ interface ReviewParams {
   maxWords?: number;
   language?: string; // default en
   seedPatientHint?: string; // optional nuance / context
+  clinicKeywords?: string;
+  businessContext?: BusinessContext | null;
 }
 
 // NOTE: Direct Gemini usage is retained ONLY for sequence template generation below.
@@ -29,7 +32,9 @@ export async function generateAIReview(params: ReviewParams): Promise<string> {
         tone: params.tone,
         maxWords: params.maxWords,
         language: params.language,
-        seedPatientHint: params.seedPatientHint
+        seedPatientHint: params.seedPatientHint,
+        clinicKeywords: params.clinicKeywords,
+        businessContext: params.businessContext
       }
     });
     if (error) throw error;
@@ -61,7 +66,9 @@ export async function generateAIReview(params: ReviewParams): Promise<string> {
           tone: params.tone,
           maxWords: params.maxWords,
           language: params.language,
-          seedPatientHint: params.seedPatientHint
+          seedPatientHint: params.seedPatientHint,
+          clinicKeywords: params.clinicKeywords,
+          businessContext: params.businessContext
         })
       });
       if (!resp.ok) {
@@ -93,114 +100,37 @@ interface GenerateSequenceParams {
   profileType: string;
   clinicName: string;
   clinicPhone: string;
+  businessContext?: BusinessContext | null;
+  clinicKeywords?: string;
 }
 
 export async function generateSequenceTemplatesAI(params: GenerateSequenceParams): Promise<SequenceTemplateAI[]> {
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
-    const languageNames = {
-      en: 'English',
-      hi: 'Hindi',
-      gu: 'Gujarati',
-      mr: 'Marathi'
-    };
-
-    const prompt = `Create ${params.numMessages} WhatsApp-friendly sequence messages for a healthcare clinic in ${languageNames[params.language as keyof typeof languageNames] || 'English'}.
-
-Theme: ${params.theme}
-Details: ${params.details}
-Profile Type: ${params.profileType}
-Clinic: ${params.clinicName}
-
-STRUCTURE REQUIREMENTS:
-1. Each message must follow this structure:
-   - Greeting: Start with "Hello {patient_name},"
-   - Main Content: Educational/informational content related to the theme
-   - Call to Action: Encourage contact or visit
-   - Closing: End with clinic name and contact info
-
-2. Use these placeholders (DO NOT replace them):
-   - {patient_name} - for patient's name
-   - {clinic_name} - for clinic name
-   - {clinic_phone} - for clinic phone number
-
-3. WhatsApp-friendly formatting:
-   - Use emojis appropriately (📞, 🏥, 📅, ✅, etc.)
-   - Keep messages under 300 words
-   - Use line breaks for readability
-   - Bold important text with **text**
-
-4. Sequence timing:
-   - Message 1: 7-15 days after visit
-   - Message 2: 25-35 days after visit
-   - Message 3: 50-65 days after visit
-   - Continue pattern with 20-30 day gaps
-
-5. Content progression:
-   - Early messages: General health tips and check-in
-   - Middle messages: Specific advice related to theme
-   - Later messages: Preventive care and follow-up reminders
-
-RESPONSE FORMAT (JSON):
-Return ONLY a valid JSON array with this exact structure:
-[
-  {
-    "messageTemplate": "Hello {patient_name},\\n\\nYour message content here...\\n\\n✅ Contact us at:\\n📞 {clinic_name} | {clinic_phone}",
-    "sequenceDays": 15,
-    "sequenceOrder": 1
-  },
-  {
-    "messageTemplate": "Hello {patient_name},\\n\\nSecond message content...\\n\\n✅ For more information:\\n📞 {clinic_name} | {clinic_phone}",
-    "sequenceDays": 30,
-    "sequenceOrder": 2
-  }
-]
-
-IMPORTANT:
-- Return ONLY the JSON array, no additional text
-- Ensure proper JSON escaping for line breaks (\\n)
-- Make content relevant to ${params.theme} and ${params.profileType}
-- Include educational value in each message
-- Maintain professional yet friendly tone`;
-
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const responseText = response.text().trim();
-
-    try {
-      // Clean the response to ensure it's valid JSON
-      const cleanedResponse = responseText
-        .replace(/```json\s*/g, '')
-        .replace(/```\s*/g, '')
-        .trim();
-
-      const templates = JSON.parse(cleanedResponse);
-      
-      // Validate the response structure
-      if (!Array.isArray(templates)) {
-        throw new Error('Response is not an array');
+    // Use Supabase edge function instead of direct Gemini API call
+    const { data, error } = await supabase.functions.invoke('generate-sequence-templates', {
+      body: {
+        theme: params.theme,
+        details: params.details,
+        numMessages: params.numMessages,
+        language: params.language,
+        profileType: params.profileType,
+        clinicName: params.clinicName,
+        clinicPhone: params.clinicPhone,
+        businessContext: params.businessContext,
+        clinicKeywords: params.clinicKeywords
       }
+    });
 
-      // Validate each template
-      const validatedTemplates = templates.map((template, index) => {
-        if (!template.messageTemplate || !template.sequenceDays || !template.sequenceOrder) {
-          throw new Error(`Invalid template structure at index ${index}`);
-        }
-        
-        return {
-          messageTemplate: template.messageTemplate,
-          sequenceDays: parseInt(template.sequenceDays),
-          sequenceOrder: parseInt(template.sequenceOrder)
-        };
-      });
-
-      return validatedTemplates;
-    } catch (parseError) {
-      console.error('Error parsing AI response:', parseError);
-      console.error('Raw response:', responseText);
-      throw new Error('Failed to parse AI response. Please try again.');
+    if (error) {
+      console.error('Error from edge function:', error);
+      throw new Error('Failed to generate sequence templates');
     }
+
+    if (!data || !data.templates) {
+      throw new Error('Invalid response from server');
+    }
+
+    return data.templates;
   } catch (error) {
     console.error('Error generating sequence templates:', error);
     throw new Error('Failed to generate sequence templates. Please try again later.');

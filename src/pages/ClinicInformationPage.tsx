@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
-import { supabase } from '../services/supabaseClient';
-import { SequenceTheme, SequenceTemplateAI } from '../types';
-import { generateSequenceTemplatesAI } from '../services/aiService';
-import { Camera, Upload, Save, AlertCircle, Plus, Trash2, User, MapPin, Phone, Globe, Calendar, Users, Star, Award, Palette, BookOpen, Video, Building2, Stethoscope, ShieldCheck, Car, MessageSquare, Edit3, X, Check, FileText } from 'lucide-react';
+import { uploadMedia, UploadedFileInfo } from '../services/uploadService';
+import { Upload, Save, AlertCircle, Plus, Trash2 } from 'lucide-react';
 
 const COLOR_PRESETS = [
   { name: 'Indigo + Slate', primary: '#4F46E5', secondary: '#334155' },
@@ -15,7 +13,7 @@ const COLOR_PRESETS = [
 ];
 
 const SPECIALTIES = [
-  'General Medicine', 'Gynecology', 'Orthopedics', 'Dental', 'ENT', 'Physiotherapy',
+  'General Medicine', 'General Surgery', 'Gynecology', 'Orthopedics', 'Dental', 'ENT', 'Physiotherapy',
   'Cardiology', 'Dermatology', 'Pediatrics', 'Neurology', 'Psychiatry', 'Ophthalmology',
   'Urology', 'Oncology', 'Radiology', 'Anesthesiology', 'Emergency Medicine', 'Other'
 ];
@@ -44,16 +42,8 @@ interface HealthPackage {
   benefit: string;
 }
 
-// Mock upload service - you'll need to implement the actual service
-const uploadMedia = async (files: File[], options: any): Promise<{ url: string }[]> => {
-  // Simulate upload delay
-  await new Promise(resolve => setTimeout(resolve, 1000));
-  // Return mock URLs - in real implementation this would upload to your server/cloud
-  return files.map(file => ({ url: `https://example.com/uploads/${file.name}` }));
-};
-
 export default function ClinicInformationPage() {
-  const { user } = useStore() as any;
+  const { user, saveClinicRequest, fetchClinicRequest } = useStore() as any;
   const [form, setForm] = useState({
     // 1. Basic Details
     clinicName: user?.clinicName || '',
@@ -134,41 +124,19 @@ export default function ClinicInformationPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState(1);
   const [existingData, setExistingData] = useState<any>(null);
-  const [saving, setSaving] = useState(false);
-  
-  // Theme and template state
-  const [themes, setThemes] = useState<SequenceTheme[]>([]);
-  const [templates, setTemplates] = useState<SequenceTemplateAI[]>([]);
-  const [newTheme, setNewTheme] = useState({
-    themeName: '',
-    themeDescription: '',
-    profileType: '',
-    language: 'en'
-  });
-  const [generatingTemplates, setGeneratingTemplates] = useState(false);
-  
-  // Existing clinic information
-  const [clinicInfo, setClinicInfo] = useState<any>(null);
-  
-  // Additional UI state
-  const [activeTab, setActiveTab] = useState('info');
-  const [editingInfo, setEditingInfo] = useState(false);
-  const [infoForm, setInfoForm] = useState<any>({});
 
   // Load existing clinic request data when component mounts
   useEffect(() => {
     const loadExistingData = async () => {
-      if (!user?.id) return;
+      if (!user?.id || !fetchClinicRequest) return;
       
       setLoading(true);
       try {
-        // In a real implementation, you'd fetch from your database
-        // const data = await fetchClinicRequest();
-        // if (data) {
-        //   setExistingData(data);
-        //   populateFormFromData(data);
-        // }
-        console.log('Loading clinic data for user:', user.id);
+        const data = await fetchClinicRequest();
+        if (data) {
+          setExistingData(data);
+          populateFormFromData(data);
+        }
       } catch (e) {
         console.warn('No existing clinic data found or failed to load:', e);
       } finally {
@@ -177,7 +145,7 @@ export default function ClinicInformationPage() {
     };
 
     loadExistingData();
-  }, [user?.id]);
+  }, [user?.id, fetchClinicRequest]);
 
   // Populate form with existing data
   const populateFormFromData = (data: any) => {
@@ -248,90 +216,155 @@ export default function ClinicInformationPage() {
     }
   };
 
-  const createTheme = async () => {
-    if (!user?.id || !newTheme.themeName.trim()) return;
-
+  const uploadToCategory = async (files: FileList | null, category: keyof typeof form.images) => {
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    setError(null);
     try {
-      const { data, error } = await supabase
-        .from('sequence_themes')
-        .insert({
-          user_id: user.id,
-          theme_name: newTheme.themeName,
-          theme_description: newTheme.themeDescription,
-          profile_type: newTheme.profileType,
-          language: newTheme.language
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-      
-      setThemes([data, ...themes]);
-      setNewTheme({ themeName: '', themeDescription: '', profileType: '', language: 'en' });
-    } catch (error) {
-      console.error('Error creating theme:', error);
-      alert('Failed to create theme. Please try again.');
-    }
-  };
-
-  const generateTemplatesForTheme = async (theme: SequenceTheme) => {
-    if (!user?.id || !clinicInfo) return;
-
-    try {
-      setGeneratingTemplates(true);
-      const params = {
-        theme: theme.themeName,
-        details: theme.themeDescription || '',
-        numMessages: 3,
-        language: theme.language,
-        profileType: theme.profileType,
-        clinicName: clinicInfo.clinicName,
-        clinicPhone: clinicInfo.clinicPhone || ''
-      };
-
-      const aiTemplates = await generateSequenceTemplatesAI(params);
-
-      // Save to database
-      const templatesData = aiTemplates.map((template: any) => ({
-        user_id: user.id,
-        theme_id: theme.id,
-        message_template: template.messageTemplate,
-        sequence_days: template.sequenceDays,
-        sequence_order: template.sequenceOrder,
-        profile_type: theme.profileType,
-        language: theme.language,
-        generated_by: 'ai' as const
+      const res = await uploadMedia(Array.from(files), { 
+        userId: user?.id, 
+        folder: `clinic/${category}` 
+      });
+      setForm(prev => ({
+        ...prev,
+        images: {
+          ...prev.images,
+          [category]: [...prev.images[category], ...res.map((f: UploadedFileInfo) => f.url)]
+        }
       }));
-
-      const { data, error } = await supabase
-        .from('sequence_templates_ai')
-        .insert(templatesData)
-        .select();
-
-      if (error) throw error;
-      
-      setTemplates([...templates, ...data]);
-      alert(`Generated ${aiTemplates.length} templates for theme "${theme.themeName}"`);
-    } catch (error) {
-      console.error('Error generating templates:', error);
-      alert('Failed to generate templates. Please try again.');
+    } catch (e: any) {
+      setError(e.message || 'Failed to upload images');
     } finally {
-      setGeneratingTemplates(false);
+      setUploading(false);
     }
   };
 
-  const saveForm = async () => {
-    if (!user?.id) return;
-
+  const uploadLogo = async (file: File) => {
+    setUploading(true);
+    setError(null);
     try {
-      setSaving(true);
-      const dataToSave = {
-        user_id: user.id,
+      console.log('Uploading logo:', file.name, file.type, file.size);
+      const res = await uploadMedia([file], { 
+        userId: user?.id, 
+        folder: 'clinic/branding' 
+      });
+      console.log('Upload response:', res);
+      const logoUrl = res[0]?.url || '';
+      if (logoUrl) {
+        console.log('Setting logo URL:', logoUrl);
+        setForm(prev => ({ ...prev, logoUrl }));
+        setSuccess('Logo uploaded successfully!');
+        setTimeout(() => setSuccess(null), 3000);
+      } else {
+        throw new Error('No URL returned from upload');
+      }
+    } catch (e: any) {
+      console.error('Logo upload error:', e);
+      setError(e.message || 'Failed to upload logo');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const uploadDoctorPhoto = async (file: File, doctorIndex: number) => {
+    setUploading(true);
+    setError(null);
+    try {
+      const res = await uploadMedia([file], { 
+        userId: user?.id, 
+        folder: 'clinic/doctors' 
+      });
+      setForm(prev => ({
+        ...prev,
+        doctors: prev.doctors.map((doc, idx) => 
+          idx === doctorIndex ? { ...doc, photoUrl: res[0]?.url || '' } : doc
+        )
+      }));
+    } catch (e: any) {
+      setError(e.message || 'Failed to upload doctor photo');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const addDoctor = () => {
+    setForm(prev => ({
+      ...prev,
+      doctors: [...prev.doctors, {
+        name: '',
+        qualification: '',
+        specialty: '',
+        experience: '',
+        procedures: '',
+        pastExperience: '',
+        currentAffiliation: '',
+        languages: '',
+        photoUrl: ''
+      }]
+    }));
+  };
+
+  const updateDoctor = (idx: number, field: keyof Doctor, value: string) => {
+    setForm(prev => ({
+      ...prev,
+      doctors: prev.doctors.map((doc, i) => i === idx ? { ...doc, [field]: value } : doc)
+    }));
+  };
+
+  const removeDoctor = (idx: number) => {
+    setForm(prev => ({
+      ...prev,
+      doctors: prev.doctors.filter((_, i) => i !== idx)
+    }));
+  };
+
+  const addHealthPackage = () => {
+    setForm(prev => ({
+      ...prev,
+      healthPackages: [...prev.healthPackages, { name: '', included: '', duration: '', benefit: '' }]
+    }));
+  };
+
+  const updateHealthPackage = (idx: number, field: keyof HealthPackage, value: string) => {
+    setForm(prev => ({
+      ...prev,
+      healthPackages: prev.healthPackages.map((pkg, i) => i === idx ? { ...pkg, [field]: value } : pkg)
+    }));
+  };
+
+  const removeHealthPackage = (idx: number) => {
+    setForm(prev => ({
+      ...prev,
+      healthPackages: prev.healthPackages.filter((_, i) => i !== idx)
+    }));
+  };
+
+  const toggleLanguage = (lang: string) => {
+    setForm(prev => ({
+      ...prev,
+      languages: prev.languages.includes(lang)
+        ? prev.languages.filter(l => l !== lang)
+        : [...prev.languages, lang]
+    }));
+  };
+
+  const selectPreset = (primary: string, secondary: string) => {
+    setForm(prev => ({ ...prev, colorPrimary: primary, colorSecondary: secondary }));
+  };
+
+  const saveDraft = async (showMessage = true) => {
+    setError(null);
+    setSuccess(null);
+    try {
+      if (!user?.id) throw new Error('User not authenticated');
+      
+      const payload = {
+        // Note: user_id is NOT included here - it's set automatically in the store
+        // Map form data to database structure
         clinic_name: form.clinicName,
         tagline: form.tagline,
         specialty: form.specialty,
         affiliations: form.affiliations,
-        languages: form.languages,
         main_phone: form.mainPhone,
         emergency_phone: form.emergencyPhone,
         whatsapp_number: form.whatsappNumber,
@@ -358,645 +391,1007 @@ export default function ClinicInformationPage() {
         awards: form.awards,
         memberships: form.memberships,
         special_facilities: form.specialFacilities,
+        languages: form.languages,
         logo_url: form.logoUrl,
         color_primary: form.colorPrimary,
         color_secondary: form.colorSecondary,
-        updated_at: new Date().toISOString()
+        is_draft: true
       };
-
-      if (clinicInfo?.id) {
-        const { data, error } = await supabase
-          .from('clinic_information')
-          .update(dataToSave)
-          .eq('id', clinicInfo.id)
-          .select()
-          .single();
-
-        if (error) throw error;
-        setClinicInfo(data);
-      } else {
-        const { data, error } = await supabase
-          .from('clinic_information')
-          .insert(dataToSave)
-          .select()
-          .single();
-
-        if (error) throw error;
-        setClinicInfo(data);
-      }
-
-      setSuccess('Clinic information saved successfully!');
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (error) {
-      console.error('Error saving clinic information:', error);
-      setError('Failed to save clinic information. Please try again.');
-      setTimeout(() => setError(null), 3000);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const deleteTheme = async (themeId: string) => {
-    if (!window.confirm('Are you sure you want to delete this theme? This will also delete all associated templates.')) {
-      return;
-    }
-
-    try {
-      const { error } = await supabase
-        .from('sequence_themes')
-        .delete()
-        .eq('id', themeId);
-
-      if (error) throw error;
       
-      setThemes(themes.filter(t => t.id !== themeId));
-      setTemplates(templates.filter(t => t.themeId !== themeId));
-    } catch (error) {
-      console.error('Error deleting theme:', error);
-      alert('Failed to delete theme. Please try again.');
+      await saveClinicRequest?.(payload);
+      if (showMessage) {
+        setSuccess('Draft saved successfully! You can continue later.');
+      }
+    } catch (e: any) {
+      setError(e.message || 'Failed to save draft');
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
-      </div>
-    );
-  }
+  const submitFinal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setSuccess(null);
+    try {
+      if (!user?.id) throw new Error('User not authenticated');
+      
+      const payload = {
+        // Note: user_id is NOT included here - it's set automatically in the store
+        clinic_name: form.clinicName,
+        tagline: form.tagline,
+        specialty: form.specialty,
+        affiliations: form.affiliations,
+        main_phone: form.mainPhone,
+        emergency_phone: form.emergencyPhone,
+        whatsapp_number: form.whatsappNumber,
+        contact_email: form.email,
+        website_url: form.website,
+        gmb_link: form.gmbLink,
+        social_links: form.socialLinks,
+        clinic_display_name: form.clinicDisplayName,
+        full_address: form.fullAddress,
+        city: form.city,
+        state: form.state,
+        pincode: form.pincode,
+        map_link: form.mapLink,
+        timings: form.timings,
+        parking_details: form.parkingDetails,
+        treatments: form.treatments,
+        health_packages: form.healthPackages,
+        doctors: form.doctors,
+        clinic_message: form.clinicMessage,
+        blog_link: form.blogLink,
+        youtube_channel: form.youtubeChannel,
+        articles: form.articles,
+        images: form.images,
+        awards: form.awards,
+        memberships: form.memberships,
+        special_facilities: form.specialFacilities,
+        languages: form.languages,
+        logo_url: form.logoUrl,
+        color_primary: form.colorPrimary,
+        color_secondary: form.colorSecondary,
+        is_draft: false
+      };
+      
+      await saveClinicRequest?.(payload);
+      setSuccess('Clinic information submitted successfully!');
+    } catch (e: any) {
+      setError(e.message || 'Submission failed');
+    }
+  };
+
+  const sections = [
+    { id: 1, title: 'Basic Details', icon: '📝' },
+    { id: 2, title: 'Contact & Online', icon: '📞' },
+    { id: 3, title: 'Location & Timings', icon: '📍' },
+    { id: 4, title: 'Services & Packages', icon: '🏥' },
+    { id: 5, title: 'Team & Doctors', icon: '👨‍⚕️' },
+    { id: 6, title: 'About & Education', icon: '📚' },
+    { id: 7, title: 'Images & Media', icon: '📸' },
+    { id: 8, title: 'Additional Info', icon: '⭐' },
+    { id: 9, title: 'Design & Colors', icon: '🎨' }
+  ];
 
   return (
-    <div className="space-y-6">
+    <div className="max-w-6xl mx-auto">
       {/* Header */}
-      <div className="bg-white shadow rounded-lg p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 flex items-center">
-              <Building2 className="h-8 w-8 mr-3 text-indigo-600" />
-              Clinic Information Management
-            </h1>
-            <p className="text-gray-600 mt-1">
-              Manage your clinic details, sequence themes, and AI-generated templates
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold text-gray-900">Clinic Information Form</h1>
+        <p className="text-gray-600 mt-2">
+          Share your clinic details for website creation. All fields are optional - save as draft and complete later!
+        </p>
+        {existingData && (
+          <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-blue-700 text-sm">
+              You have existing clinic information. Update any details and save to continue.
             </p>
           </div>
-        </div>
-
-        {/* Tabs */}
-        <div className="mt-6 border-b border-gray-200">
-          <nav className="-mb-px flex space-x-8">
-            {[
-              { id: 'info', label: 'Clinic Info', icon: Building2 },
-              { id: 'themes', label: 'Sequence Themes', icon: FileText },
-              { id: 'templates', label: 'AI Templates', icon: Users }
-            ].map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
-                className={`group inline-flex items-center py-2 px-1 border-b-2 font-medium text-sm ${
-                  activeTab === tab.id
-                    ? 'border-indigo-500 text-indigo-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                <tab.icon className="h-5 w-5 mr-2" />
-                {tab.label}
-              </button>
-            ))}
-          </nav>
-        </div>
+        )}
       </div>
 
-      {/* Clinic Information Tab */}
-      {activeTab === 'info' && (
-        <div className="bg-white shadow rounded-lg p-6">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-lg font-medium text-gray-900">Clinic Information</h2>
-            {!editingInfo ? (
-              <button
-                onClick={() => setEditingInfo(true)}
-                className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
-              >
-                <Edit3 className="h-4 w-4 mr-2" />
-                Edit
-              </button>
-            ) : (
-              <div className="flex space-x-2">
-                <button
-                  onClick={saveForm}
-                  disabled={saving}
-                  className="inline-flex items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
-                >
-                  <Save className="h-4 w-4 mr-2" />
-                  {saving ? 'Saving...' : 'Save'}
-                </button>
-                <button
-                  onClick={() => {
-                    setEditingInfo(false);
-                    setInfoForm(clinicInfo || {});
-                  }}
-                  className="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
-                >
-                  <X className="h-4 w-4 mr-2" />
-                  Cancel
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Comprehensive 9-Section Form */}
-          <div className="space-y-8">
-            {/* 1. Basic Details */}
-            <div className="bg-gray-50 rounded-lg p-6">
-              <div className="flex items-center mb-4">
-                <Building2 className="h-5 w-5 text-indigo-600 mr-2" />
-                <h3 className="text-lg font-medium text-gray-900">Basic Details</h3>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Clinic Name *</label>
-                  <input
-                    type="text"
-                    name="clinicName"
-                    value={form.clinicName}
-                    onChange={onChange}
-                    disabled={!editingInfo}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Tagline</label>
-                  <input
-                    type="text"
-                    name="tagline"
-                    value={form.tagline}
-                    onChange={onChange}
-                    disabled={!editingInfo}
-                    placeholder="Your clinic's tagline"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Primary Specialty</label>
-                  <select
-                    name="specialty"
-                    value={form.specialty}
-                    onChange={onChange}
-                    disabled={!editingInfo}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
-                  >
-                    <option value="">Select Specialty</option>
-                    {SPECIALTIES.map(specialty => (
-                      <option key={specialty} value={specialty}>{specialty}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Affiliations</label>
-                  <input
-                    type="text"
-                    name="affiliations"
-                    value={form.affiliations}
-                    onChange={onChange}
-                    disabled={!editingInfo}
-                    placeholder="Medical associations, hospitals"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* 2. Contact & Online Presence */}
-            <div className="bg-gray-50 rounded-lg p-6">
-              <div className="flex items-center mb-4">
-                <Phone className="h-5 w-5 text-indigo-600 mr-2" />
-                <h3 className="text-lg font-medium text-gray-900">Contact & Online Presence</h3>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Main Phone *</label>
-                  <input
-                    type="tel"
-                    name="mainPhone"
-                    value={form.mainPhone}
-                    onChange={onChange}
-                    disabled={!editingInfo}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Emergency Phone</label>
-                  <input
-                    type="tel"
-                    name="emergencyPhone"
-                    value={form.emergencyPhone}
-                    onChange={onChange}
-                    disabled={!editingInfo}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">WhatsApp Number</label>
-                  <input
-                    type="tel"
-                    name="whatsappNumber"
-                    value={form.whatsappNumber}
-                    onChange={onChange}
-                    disabled={!editingInfo}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Email *</label>
-                  <input
-                    type="email"
-                    name="email"
-                    value={form.email}
-                    onChange={onChange}
-                    disabled={!editingInfo}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Website</label>
-                  <input
-                    type="url"
-                    name="website"
-                    value={form.website}
-                    onChange={onChange}
-                    disabled={!editingInfo}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Google My Business Link</label>
-                  <input
-                    type="url"
-                    name="gmbLink"
-                    value={form.gmbLink}
-                    onChange={onChange}
-                    disabled={!editingInfo}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* 3. Location */}
-            <div className="bg-gray-50 rounded-lg p-6">
-              <div className="flex items-center mb-4">
-                <MapPin className="h-5 w-5 text-indigo-600 mr-2" />
-                <h3 className="text-lg font-medium text-gray-900">Clinic Location</h3>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Full Address *</label>
-                  <textarea
-                    name="fullAddress"
-                    value={form.fullAddress}
-                    onChange={onChange}
-                    disabled={!editingInfo}
-                    rows={3}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
-                  <input
-                    type="text"
-                    name="city"
-                    value={form.city}
-                    onChange={onChange}
-                    disabled={!editingInfo}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">State</label>
-                  <input
-                    type="text"
-                    name="state"
-                    value={form.state}
-                    onChange={onChange}
-                    disabled={!editingInfo}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Pincode</label>
-                  <input
-                    type="text"
-                    name="pincode"
-                    value={form.pincode}
-                    onChange={onChange}
-                    disabled={!editingInfo}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Google Maps Link</label>
-                  <input
-                    type="url"
-                    name="mapLink"
-                    value={form.mapLink}
-                    onChange={onChange}
-                    disabled={!editingInfo}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* 4. Services & Packages */}
-            <div className="bg-gray-50 rounded-lg p-6">
-              <div className="flex items-center mb-4">
-                <Stethoscope className="h-5 w-5 text-indigo-600 mr-2" />
-                <h3 className="text-lg font-medium text-gray-900">Services & Packages</h3>
-              </div>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Treatments & Services</label>
-                  <textarea
-                    name="treatments"
-                    value={form.treatments}
-                    onChange={onChange}
-                    disabled={!editingInfo}
-                    rows={4}
-                    placeholder="List your main treatments and services"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* 5. Team & Doctors */}
-            <div className="bg-gray-50 rounded-lg p-6">
-              <div className="flex items-center mb-4">
-                <Users className="h-5 w-5 text-indigo-600 mr-2" />
-                <h3 className="text-lg font-medium text-gray-900">Team & Doctors</h3>
-              </div>
-              <div className="text-gray-600">
-                <p>Doctor management functionality will be enhanced in future updates.</p>
-              </div>
-            </div>
-
-            {/* 6. Content */}
-            <div className="bg-gray-50 rounded-lg p-6">
-              <div className="flex items-center mb-4">
-                <BookOpen className="h-5 w-5 text-indigo-600 mr-2" />
-                <h3 className="text-lg font-medium text-gray-900">Content & Resources</h3>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Blog Link</label>
-                  <input
-                    type="url"
-                    name="blogLink"
-                    value={form.blogLink}
-                    onChange={onChange}
-                    disabled={!editingInfo}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">YouTube Channel</label>
-                  <input
-                    type="url"
-                    name="youtubeChannel"
-                    value={form.youtubeChannel}
-                    onChange={onChange}
-                    disabled={!editingInfo}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
-                  />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Clinic Message</label>
-                  <textarea
-                    name="clinicMessage"
-                    value={form.clinicMessage}
-                    onChange={onChange}
-                    disabled={!editingInfo}
-                    rows={3}
-                    placeholder="A message from your clinic to patients"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* 7. Design & Branding */}
-            <div className="bg-gray-50 rounded-lg p-6">
-              <div className="flex items-center mb-4">
-                <Palette className="h-5 w-5 text-indigo-600 mr-2" />
-                <h3 className="text-lg font-medium text-gray-900">Design & Branding</h3>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Primary Color</label>
-                  <input
-                    type="color"
-                    name="colorPrimary"
-                    value={form.colorPrimary}
-                    onChange={onChange}
-                    disabled={!editingInfo}
-                    className="w-full h-10 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Secondary Color</label>
-                  <input
-                    type="color"
-                    name="colorSecondary"
-                    value={form.colorSecondary}
-                    onChange={onChange}
-                    disabled={!editingInfo}
-                    className="w-full h-10 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
-                  />
-                </div>
-              </div>
-              <div className="mt-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Color Presets</label>
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-                  {COLOR_PRESETS.map((preset, index) => (
-                    <button
-                      key={index}
-                      type="button"
-                      disabled={!editingInfo}
-                      onClick={() => {
-                        setForm(prev => ({
-                          ...prev,
-                          colorPrimary: preset.primary,
-                          colorSecondary: preset.secondary
-                        }));
-                      }}
-                      className="p-2 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <div className="flex space-x-1">
-                        <div 
-                          className="w-4 h-4 rounded"
-                          style={{ backgroundColor: preset.primary }}
-                        />
-                        <div 
-                          className="w-4 h-4 rounded"
-                          style={{ backgroundColor: preset.secondary }}
-                        />
-                      </div>
-                      <div className="text-xs mt-1 text-gray-600">{preset.name}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
+      {/* Loading State */}
+      {loading && (
+        <div className="text-center py-12">
+          <div className="inline-flex items-center gap-3">
+            <div className="w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+            <span className="text-gray-600">Loading your clinic information...</span>
           </div>
         </div>
       )}
 
-      {/* Themes Tab */}
-      {activeTab === 'themes' && (
-        <div className="space-y-6">
-          {/* Add New Theme */}
-          <div className="bg-white shadow rounded-lg p-6">
-            <h2 className="text-lg font-medium text-gray-900 mb-4">Create New Theme</h2>
+      {/* Form Content - only show after loading */}
+      {!loading && (
+        <>
+          {/* Section Navigation */}
+          <div className="mb-8">
+            <div className="flex flex-wrap gap-2">
+              {sections.map(section => (
+                <button
+                  key={section.id}
+                  onClick={() => setActiveSection(section.id)}
+                  className={`px-4 py-2 text-sm rounded-lg transition-colors ${
+                    activeSection === section.id
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  {section.icon} {section.title}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <form onSubmit={submitFinal} className="space-y-8">
+        {/* Section 1: Basic Details */}
+        {activeSection === 1 && (
+          <div className="bg-white rounded-lg border p-6 space-y-4">
+            <h2 className="text-xl font-semibold flex items-center gap-2">
+              📝 Basic Details
+            </h2>
+            
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Theme Name *
+                  Clinic Name *
                 </label>
                 <input
                   type="text"
-                  value={newTheme.themeName}
-                  onChange={(e) => setNewTheme({ ...newTheme, themeName: e.target.value })}
-                  placeholder="e.g., Diabetes Care Follow-up"
+                  name="clinicName"
+                  value={form.clinicName}
+                  onChange={onChange}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                  required
                 />
               </div>
+              
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Profile Type *
+                  Tagline
                 </label>
                 <input
                   type="text"
-                  value={newTheme.profileType}
-                  onChange={(e) => setNewTheme({ ...newTheme, profileType: e.target.value })}
-                  placeholder="e.g., Diabetes Patient"
+                  name="tagline"
+                  value={form.tagline}
+                  onChange={onChange}
+                  placeholder="Your clinic's tagline"
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
                 />
               </div>
-              <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Description
-                </label>
-                <textarea
-                  value={newTheme.themeDescription}
-                  onChange={(e) => setNewTheme({ ...newTheme, themeDescription: e.target.value })}
-                  placeholder="Describe the sequence theme and its purpose..."
-                  rows={3}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
-                />
-              </div>
+              
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Language
+                  Primary Specialty *
                 </label>
                 <select
-                  value={newTheme.language}
-                  onChange={(e) => setNewTheme({ ...newTheme, language: e.target.value })}
+                  name="specialty"
+                  value={form.specialty}
+                  onChange={onChange}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                  required
                 >
-                  <option value="en">English</option>
-                  <option value="hi">Hindi</option>
-                  <option value="gu">Gujarati</option>
-                  <option value="mr">Marathi</option>
+                  <option value="">Select Specialty</option>
+                  {SPECIALTIES.map(specialty => (
+                    <option key={specialty} value={specialty}>{specialty}</option>
+                  ))}
                 </select>
               </div>
-              <div className="flex items-end">
-                <button
-                  onClick={createTheme}
-                  disabled={!newTheme.themeName.trim() || !newTheme.profileType.trim()}
-                  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Create Theme
-                </button>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Affiliations
+                </label>
+                <input
+                  type="text"
+                  name="affiliations"
+                  value={form.affiliations}
+                  onChange={onChange}
+                  placeholder="Medical associations, hospitals"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              </div>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Languages Spoken
+              </label>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                {LANGUAGES.map(lang => (
+                  <label key={lang} className="flex items-center">
+                    <input
+                      type="checkbox"
+                      checked={form.languages.includes(lang)}
+                      onChange={() => toggleLanguage(lang)}
+                      className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span className="ml-2 text-sm text-gray-700">{lang}</span>
+                  </label>
+                ))}
               </div>
             </div>
           </div>
+        )}
 
-          {/* Existing Themes */}
-          <div className="bg-white shadow rounded-lg p-6">
-            <h2 className="text-lg font-medium text-gray-900 mb-4">Existing Themes</h2>
-            {themes.length === 0 ? (
-              <p className="text-gray-500 text-center py-8">No themes created yet.</p>
-            ) : (
-              <div className="space-y-4">
-                {themes.map(theme => (
-                  <div key={theme.id} className="border border-gray-200 rounded-lg p-4">
-                    <div className="flex justify-between items-start">
-                      <div className="flex-1">
-                        <h3 className="font-medium text-gray-900">{theme.themeName}</h3>
-                        <p className="text-sm text-gray-600 mt-1">
-                          Profile: {theme.profileType} • Language: {theme.language}
-                        </p>
-                        {theme.themeDescription && (
-                          <p className="text-sm text-gray-500 mt-2">{theme.themeDescription}</p>
-                        )}
-                      </div>
-                      <div className="flex space-x-2 ml-4">
-                        <button
-                          onClick={() => generateTemplatesForTheme(theme)}
-                          disabled={generatingTemplates}
-                          className="inline-flex items-center px-3 py-1 text-xs font-medium rounded border border-indigo-300 text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"
-                        >
-                          {generatingTemplates ? 'Generating...' : 'Generate Templates'}
-                        </button>
-                        <button
-                          onClick={() => deleteTheme(theme.id)}
-                          className="inline-flex items-center px-3 py-1 text-xs font-medium rounded border border-red-300 text-red-600 hover:bg-red-50"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </button>
-                      </div>
-                    </div>
+        {/* Section 2: Contact & Online Presence */}
+        {activeSection === 2 && (
+          <div className="bg-white rounded-lg border p-6 space-y-4">
+            <h2 className="text-xl font-semibold flex items-center gap-2">
+              📞 Contact & Online Presence
+            </h2>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Main Phone *
+                </label>
+                <input
+                  type="tel"
+                  name="mainPhone"
+                  value={form.mainPhone}
+                  onChange={onChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                  required
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Emergency Phone
+                </label>
+                <input
+                  type="tel"
+                  name="emergencyPhone"
+                  value={form.emergencyPhone}
+                  onChange={onChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  WhatsApp Number
+                </label>
+                <input
+                  type="tel"
+                  name="whatsappNumber"
+                  value={form.whatsappNumber}
+                  onChange={onChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Email *
+                </label>
+                <input
+                  type="email"
+                  name="email"
+                  value={form.email}
+                  onChange={onChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                  required
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Website
+                </label>
+                <input
+                  type="url"
+                  name="website"
+                  value={form.website}
+                  onChange={onChange}
+                  placeholder="https://..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Google My Business Link
+                </label>
+                <input
+                  type="url"
+                  name="gmbLink"
+                  value={form.gmbLink}
+                  onChange={onChange}
+                  placeholder="https://..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              </div>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Social Media Links
+              </label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {Object.entries(form.socialLinks).map(([platform, url]) => (
+                  <div key={platform}>
+                    <label className="block text-sm font-medium text-gray-700 mb-1 capitalize">
+                      {platform}
+                    </label>
+                    <input
+                      type="url"
+                      name={`socialLinks.${platform}`}
+                      value={url}
+                      onChange={onChange}
+                      placeholder={`https://${platform}.com/...`}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                    />
                   </div>
                 ))}
               </div>
-            )}
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Templates Tab */}
-      {activeTab === 'templates' && (
-        <div className="bg-white shadow rounded-lg p-6">
-          <h2 className="text-lg font-medium text-gray-900 mb-4">AI Generated Templates</h2>
-          {templates.length === 0 ? (
-            <p className="text-gray-500 text-center py-8">
-              No templates generated yet. Create themes and generate templates from the themes tab.
-            </p>
-          ) : (
-            <div className="space-y-6">
-              {templates.map(template => (
-                <div key={template.id} className="border border-gray-200 rounded-lg p-4">
+        {/* Section 3: Location & Timings */}
+        {activeSection === 3 && (
+          <div className="bg-white rounded-lg border p-6 space-y-4">
+            <h2 className="text-xl font-semibold flex items-center gap-2">
+              📍 Location & Timings
+            </h2>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Clinic Display Name
+                </label>
+                <input
+                  type="text"
+                  name="clinicDisplayName"
+                  value={form.clinicDisplayName}
+                  onChange={onChange}
+                  placeholder="How should your clinic appear on maps/directories"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              </div>
+              
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Full Address *
+                </label>
+                <textarea
+                  name="fullAddress"
+                  value={form.fullAddress}
+                  onChange={onChange}
+                  rows={3}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                  required
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  City
+                </label>
+                <input
+                  type="text"
+                  name="city"
+                  value={form.city}
+                  onChange={onChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  State
+                </label>
+                <input
+                  type="text"
+                  name="state"
+                  value={form.state}
+                  onChange={onChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Pincode
+                </label>
+                <input
+                  type="text"
+                  name="pincode"
+                  value={form.pincode}
+                  onChange={onChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Google Maps Link
+                </label>
+                <input
+                  type="url"
+                  name="mapLink"
+                  value={form.mapLink}
+                  onChange={onChange}
+                  placeholder="https://maps.google.com/..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              </div>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Clinic Timings
+              </label>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">Morning Hours</label>
+                  <input
+                    type="text"
+                    name="timings.morning"
+                    value={form.timings.morning}
+                    onChange={onChange}
+                    placeholder="e.g. 9:00 AM - 1:00 PM"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">Evening Hours</label>
+                  <input
+                    type="text"
+                    name="timings.evening"
+                    value={form.timings.evening}
+                    onChange={onChange}
+                    placeholder="e.g. 5:00 PM - 8:00 PM"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">Sunday Hours</label>
+                  <input
+                    type="text"
+                    name="timings.sunday"
+                    value={form.timings.sunday}
+                    onChange={onChange}
+                    placeholder="e.g. 10:00 AM - 2:00 PM or Closed"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Parking Details
+              </label>
+              <textarea
+                name="parkingDetails"
+                value={form.parkingDetails}
+                onChange={onChange}
+                rows={2}
+                placeholder="Describe parking availability, charges, etc."
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Section 4: Services & Packages */}
+        {activeSection === 4 && (
+          <div className="bg-white rounded-lg border p-6 space-y-4">
+            <h2 className="text-xl font-semibold flex items-center gap-2">
+              🏥 Services & Packages
+            </h2>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Treatments & Services
+              </label>
+              <textarea
+                name="treatments"
+                value={form.treatments}
+                onChange={onChange}
+                rows={4}
+                placeholder="List your main treatments and services"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+              />
+            </div>
+            
+            <div>
+              <div className="flex justify-between items-center mb-3">
+                <label className="block text-sm font-medium text-gray-700">
+                  Health Packages
+                </label>
+                <button
+                  type="button"
+                  onClick={addHealthPackage}
+                  className="inline-flex items-center px-3 py-1 border border-transparent text-sm font-medium rounded-md text-indigo-600 bg-indigo-100 hover:bg-indigo-200"
+                >
+                  <Plus className="h-4 w-4 mr-1" />
+                  Add Package
+                </button>
+              </div>
+              
+              {form.healthPackages.map((pkg, idx) => (
+                <div key={idx} className="border rounded-lg p-4 mb-3">
                   <div className="flex justify-between items-start mb-3">
-                    <div>
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
-                        Message {template.sequenceOrder} • Day {template.sequenceDays}
-                      </span>
-                      <p className="text-sm text-gray-600 mt-1">
-                        {template.profileType} • {template.language}
-                      </p>
-                    </div>
-                    <span className="text-xs text-gray-400">Generated by AI</span>
+                    <h4 className="text-sm font-medium text-gray-800">Package {idx + 1}</h4>
+                    <button
+                      type="button"
+                      onClick={() => removeHealthPackage(idx)}
+                      className="text-red-600 hover:text-red-700"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
                   </div>
-                  <div className="bg-gray-50 rounded-md p-3">
-                    <pre className="whitespace-pre-wrap text-sm text-gray-800 font-mono">
-                      {template.messageTemplate}
-                    </pre>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <input
+                      type="text"
+                      placeholder="Package Name"
+                      value={pkg.name}
+                      onChange={(e) => updateHealthPackage(idx, 'name', e.target.value)}
+                      className="px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Duration"
+                      value={pkg.duration}
+                      onChange={(e) => updateHealthPackage(idx, 'duration', e.target.value)}
+                      className="px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                    />
+                    <textarea
+                      placeholder="What's included"
+                      value={pkg.included}
+                      onChange={(e) => updateHealthPackage(idx, 'included', e.target.value)}
+                      rows={2}
+                      className="px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                    />
+                    <textarea
+                      placeholder="Benefits"
+                      value={pkg.benefit}
+                      onChange={(e) => updateHealthPackage(idx, 'benefit', e.target.value)}
+                      rows={2}
+                      className="px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                    />
                   </div>
                 </div>
               ))}
             </div>
-          )}
+          </div>
+        )}
+
+        {/* Section 5: Team & Doctors */}
+        {activeSection === 5 && (
+          <div className="bg-white rounded-lg border p-6 space-y-4">
+            <div className="flex justify-between items-center">
+              <h2 className="text-xl font-semibold flex items-center gap-2">
+                👨‍⚕️ Team & Doctors
+              </h2>
+              <button
+                type="button"
+                onClick={addDoctor}
+                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add Doctor
+              </button>
+            </div>
+            
+            {form.doctors.map((doctor, idx) => (
+              <div key={idx} className="border rounded-lg p-6 space-y-4">
+                <div className="flex justify-between items-start">
+                  <h4 className="text-lg font-medium text-gray-800">Doctor {idx + 1}</h4>
+                  <button
+                    type="button"
+                    onClick={() => removeDoctor(idx)}
+                    className="text-red-600 hover:text-red-700"
+                  >
+                    <Trash2 className="h-5 w-5" />
+                  </button>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <input
+                    type="text"
+                    placeholder="Doctor Name"
+                    value={doctor.name}
+                    onChange={(e) => updateDoctor(idx, 'name', e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Qualification"
+                    value={doctor.qualification}
+                    onChange={(e) => updateDoctor(idx, 'qualification', e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Specialty"
+                    value={doctor.specialty}
+                    onChange={(e) => updateDoctor(idx, 'specialty', e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Experience"
+                    value={doctor.experience}
+                    onChange={(e) => updateDoctor(idx, 'experience', e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                </div>
+                
+                <div className="grid grid-cols-1 gap-4">
+                  <textarea
+                    placeholder="Procedures & Expertise"
+                    value={doctor.procedures}
+                    onChange={(e) => updateDoctor(idx, 'procedures', e.target.value)}
+                    rows={2}
+                    className="px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                  <textarea
+                    placeholder="Past Experience"
+                    value={doctor.pastExperience}
+                    onChange={(e) => updateDoctor(idx, 'pastExperience', e.target.value)}
+                    rows={2}
+                    className="px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Current Affiliation"
+                    value={doctor.currentAffiliation}
+                    onChange={(e) => updateDoctor(idx, 'currentAffiliation', e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Languages"
+                    value={doctor.languages}
+                    onChange={(e) => updateDoctor(idx, 'languages', e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Doctor Photo
+                  </label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => e.target.files?.[0] && uploadDoctorPhoto(e.target.files[0], idx)}
+                    className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+                  />
+                  {doctor.photoUrl && (
+                    <img src={doctor.photoUrl} alt="Doctor" className="mt-2 h-20 w-20 rounded-full object-cover" />
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Section 6: About & Education */}
+        {activeSection === 6 && (
+          <div className="bg-white rounded-lg border p-6 space-y-4">
+            <h2 className="text-xl font-semibold flex items-center gap-2">
+              📚 About & Education
+            </h2>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Clinic Message
+              </label>
+              <textarea
+                name="clinicMessage"
+                value={form.clinicMessage}
+                onChange={onChange}
+                rows={4}
+                placeholder="A message from your clinic to patients"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+              />
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Blog Link
+                </label>
+                <input
+                  type="url"
+                  name="blogLink"
+                  value={form.blogLink}
+                  onChange={onChange}
+                  placeholder="https://..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  YouTube Channel
+                </label>
+                <input
+                  type="url"
+                  name="youtubeChannel"
+                  value={form.youtubeChannel}
+                  onChange={onChange}
+                  placeholder="https://youtube.com/..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              </div>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Articles & Publications
+              </label>
+              <textarea
+                name="articles"
+                value={form.articles}
+                onChange={onChange}
+                rows={3}
+                placeholder="List any articles, research papers, or publications"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Section 7: Images & Media */}
+        {activeSection === 7 && (
+          <div className="bg-white rounded-lg border p-6 space-y-6">
+            <h2 className="text-xl font-semibold flex items-center gap-2">
+              📸 Images & Media
+            </h2>
+            
+            {/* Logo Upload */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Clinic Logo
+              </label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => e.target.files?.[0] && uploadLogo(e.target.files[0])}
+                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+              />
+              {form.logoUrl && (
+                <img src={form.logoUrl} alt="Logo" className="mt-3 h-20 object-contain" />
+              )}
+            </div>
+            
+            {/* Image Categories */}
+            {Object.entries(form.images).map(([category, urls]) => (
+              <div key={category}>
+                <label className="block text-sm font-medium text-gray-700 mb-2 capitalize">
+                  {category} Images
+                </label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={(e) => uploadToCategory(e.target.files, category as keyof typeof form.images)}
+                  className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+                />
+                {urls.length > 0 && (
+                  <div className="mt-3 grid grid-cols-3 md:grid-cols-6 gap-2">
+                    {urls.map((url, idx) => (
+                      <div key={idx} className="relative">
+                        <img src={url} alt={`${category} ${idx + 1}`} className="h-20 w-20 object-cover rounded" />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setForm(prev => ({
+                              ...prev,
+                              images: {
+                                ...prev.images,
+                                [category]: prev.images[category as keyof typeof prev.images].filter((_, i) => i !== idx)
+                              }
+                            }));
+                          }}
+                          className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs hover:bg-red-600"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Section 8: Additional Info */}
+        {activeSection === 8 && (
+          <div className="bg-white rounded-lg border p-6 space-y-4">
+            <h2 className="text-xl font-semibold flex items-center gap-2">
+              ⭐ Additional Information
+            </h2>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Awards & Recognition
+              </label>
+              <textarea
+                name="awards"
+                value={form.awards}
+                onChange={onChange}
+                rows={3}
+                placeholder="List any awards or recognition received"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Professional Memberships
+              </label>
+              <textarea
+                name="memberships"
+                value={form.memberships}
+                onChange={onChange}
+                rows={3}
+                placeholder="Professional bodies, medical associations, etc."
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Special Facilities
+              </label>
+              <textarea
+                name="specialFacilities"
+                value={form.specialFacilities}
+                onChange={onChange}
+                rows={3}
+                placeholder="Special equipment, facilities, or services"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Section 9: Design & Colors */}
+        {activeSection === 9 && (
+          <div className="bg-white rounded-lg border p-6 space-y-4">
+            <h2 className="text-xl font-semibold flex items-center gap-2">
+              🎨 Design & Colors
+            </h2>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Primary Color
+                </label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="color"
+                    value={form.colorPrimary}
+                    onChange={(e) => setForm(prev => ({ ...prev, colorPrimary: e.target.value }))}
+                    className="w-12 h-12 border border-gray-300 rounded cursor-pointer"
+                  />
+                  <input
+                    type="text"
+                    value={form.colorPrimary}
+                    onChange={(e) => setForm(prev => ({ ...prev, colorPrimary: e.target.value }))}
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Secondary Color
+                </label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="color"
+                    value={form.colorSecondary}
+                    onChange={(e) => setForm(prev => ({ ...prev, colorSecondary: e.target.value }))}
+                    className="w-12 h-12 border border-gray-300 rounded cursor-pointer"
+                  />
+                  <input
+                    type="text"
+                    value={form.colorSecondary}
+                    onChange={(e) => setForm(prev => ({ ...prev, colorSecondary: e.target.value }))}
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-3">
+                Color Presets
+              </label>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                {COLOR_PRESETS.map((preset, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => selectPreset(preset.primary, preset.secondary)}
+                    className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors"
+                  >
+                    <div className="flex gap-1">
+                      <div 
+                        className="w-6 h-6 rounded" 
+                        style={{ backgroundColor: preset.primary }}
+                      />
+                      <div 
+                        className="w-6 h-6 rounded" 
+                        style={{ backgroundColor: preset.secondary }}
+                      />
+                    </div>
+                    <span className="text-sm text-gray-700">{preset.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Status Messages */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-3">
+            <AlertCircle className="h-5 w-5 text-red-600" />
+            <span className="text-red-700">{error}</span>
+          </div>
+        )}
+
+        {success && (
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center gap-3">
+            <Save className="h-5 w-5 text-green-600" />
+            <span className="text-green-700">{success}</span>
+          </div>
+        )}
+
+        {/* Action Buttons */}
+        <div className="flex gap-4 justify-between items-center bg-white border rounded-lg p-4">
+          <div className="flex gap-2">
+            {activeSection > 1 && (
+              <button
+                type="button"
+                onClick={() => setActiveSection(activeSection - 1)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+              >
+                ← Previous
+              </button>
+            )}
+            {activeSection < sections.length && (
+              <button
+                type="button"
+                onClick={() => setActiveSection(activeSection + 1)}
+                className="px-4 py-2 text-sm font-medium text-indigo-600 bg-indigo-100 hover:bg-indigo-200 rounded-lg transition-colors"
+              >
+                Next →
+              </button>
+            )}
+          </div>
+          
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => saveDraft(true)}
+              disabled={uploading}
+              className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors disabled:opacity-50"
+            >
+              <Save className="h-4 w-4 mr-2" />
+              Save Draft
+            </button>
+            <button
+              type="submit"
+              disabled={uploading}
+              className="inline-flex items-center px-6 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors disabled:opacity-50"
+            >
+              <Upload className="h-4 w-4 mr-2" />
+              {uploading ? 'Submitting...' : 'Submit Final'}
+            </button>
+          </div>
         </div>
+      </form>
+      </>
       )}
     </div>
   );

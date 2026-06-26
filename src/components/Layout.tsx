@@ -1,8 +1,9 @@
 import React from 'react';
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useStore } from '../store/useStore';
-import { LayoutDashboard, Home, MessageSquare, Settings, LogOut, Clock, Menu, X, Palette, Shield, FileText, Wand2, Building2 } from 'lucide-react';
+import { LayoutDashboard, Home, MessageSquare, Settings, LogOut, Clock, Menu, X, Palette, Shield, FileText, Wand2, Building2, Boxes } from 'lucide-react';
 import { Send } from 'lucide-react';
+import { hasFeature, isAdminRole, isSuperAdminRole } from '../config/features';
 
 const defaultStyles = {
   backgroundColor: '#ffffff',
@@ -11,14 +12,17 @@ const defaultStyles = {
 
 const allNavItems = [
   { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
+  { path: '/products', icon: Boxes, label: 'Products' },
   { path: '/appointments', icon: Home, label: 'Appointments', feature: 'appointments' },
   { path: '/reviews', icon: MessageSquare, label: 'Reviews', feature: 'reviews' },
   { path: '/sequence-messages', icon: Clock, label: 'Sequences', feature: 'sequences' },
   { path: '/quick-send', icon: Send, label: 'Quick Send', feature: 'sequences' },
   { path: '/ai-sequence-generator', icon: Wand2, label: 'AI Generator', feature: 'sequences' },
   { path: '/creatives', icon: Palette, label: 'Your Creatives', feature: 'creatives' },
+  { path: '/reports', icon: FileText, label: 'Smart Reports', feature: 'reports' },
   { path: '/clinic-information', icon: Building2, label: 'Clinic Info' },
   { path: '/admin', icon: Shield, label: 'Admin Panel', adminOnly: true },
+  { path: '/super-admin', icon: Shield, label: 'Super Admin', superAdminOnly: true },
   { path: '/settings', icon: Settings, label: 'Settings' }
 ];
 
@@ -31,14 +35,17 @@ export function Layout() {
   // Filter navigation items based on user features and role
   const navItems = allNavItems.filter(item => {
     // Always show dashboard and settings
-    if (!item.feature && !item.adminOnly) return true;
+    if (!item.feature && !item.adminOnly && !item.superAdminOnly) return true;
     
-    // Show admin panel only for admin users
-    if (item.adminOnly) return user?.role === 'admin';
+    // Show admin panel for admin and super admin users
+    if (item.adminOnly) return isAdminRole(user?.role);
+
+    // Show super admin panel only for platform operators
+    if (item.superAdminOnly) return isSuperAdminRole(user?.role);
     
     // Show feature-based items only if enabled
     if (item.feature) {
-      return user?.enabledFeatures?.includes(item.feature) ?? false;
+      return hasFeature(user, item.feature);
     }
     
     return true;

@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
-import { Sparkles, Save, Trash2, Edit3, Check, X, AlertCircle, CheckCircle, Wand2, Users, Globe } from 'lucide-react';
+import { Sparkles, Save, Trash2, Edit3, Check, X, AlertCircle, CheckCircle, Wand2, Users, Globe, List, Plus, Search, Filter } from 'lucide-react';
 import type { ProfileType, SequenceTemplate } from '../types';
 import { AVAILABLE_PROFILE_TYPES, DEFAULT_PROFILE_TYPES } from '../constants/profileTypes';
 
@@ -19,9 +19,15 @@ export function AISequenceTemplateGeneratorPage() {
     isLoadingAIGeneration,
     generateAISequenceTemplates,
     saveAIGeneratedTemplates,
-    clearAIGeneratedTemplates
+    clearAIGeneratedTemplates,
+    deleteSequenceTemplate
   } = useStore();
 
+  const [activeTab, setActiveTab] = useState<'existing' | 'generate'>('existing');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterProfileType, setFilterProfileType] = useState<string>('all');
+  const [filterLanguage, setFilterLanguage] = useState<string>('all');
+  
   const [formData, setFormData] = useState({
     theme: '',
     details: '',
@@ -183,6 +189,45 @@ export function AISequenceTemplateGeneratorPage() {
     aiGeneratedTemplates.every(t => selectedTemplates.has(t.id));
   const someSelected = aiGeneratedTemplates.some(t => selectedTemplates.has(t.id)) && !allSelected;
 
+  // Filter existing templates
+  const filteredTemplates = sequenceTemplates.filter(template => {
+    const matchesSearch = !searchQuery || 
+      template.messageTemplate.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      template.profileType.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    const matchesProfile = filterProfileType === 'all' || template.profileType === filterProfileType;
+    const matchesLanguage = filterLanguage === 'all' || template.language === filterLanguage;
+    
+    return matchesSearch && matchesProfile && matchesLanguage;
+  });
+
+  // Group templates by profile type and language
+  const groupedTemplates = filteredTemplates.reduce((acc, template) => {
+    const key = `${template.profileType}-${template.language}`;
+    if (!acc[key]) {
+      acc[key] = {
+        profileType: template.profileType,
+        language: template.language,
+        templates: []
+      };
+    }
+    acc[key].templates.push(template);
+    return acc;
+  }, {} as Record<string, { profileType: string; language: string; templates: SequenceTemplate[] }>);
+
+  const handleDeleteTemplate = async (templateId: string) => {
+    if (confirm('Are you sure you want to delete this template?')) {
+      try {
+        await deleteSequenceTemplate(templateId);
+        setSuccess('Template deleted successfully');
+        setTimeout(() => setSuccess(''), 3000);
+      } catch (error) {
+        setError('Failed to delete template');
+        setTimeout(() => setError(''), 3000);
+      }
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -190,18 +235,182 @@ export function AISequenceTemplateGeneratorPage() {
         <div className="flex items-center">
           <Wand2 className="h-8 w-8 text-purple-600 mr-3" />
           <div>
-            <h1 className="text-2xl font-semibold text-gray-900">AI Sequence Generator</h1>
-            <p className="text-gray-600">Create custom sequence templates using AI</p>
+            <h1 className="text-2xl font-semibold text-gray-900">Sequence Management</h1>
+            <p className="text-gray-600">Manage and generate sequence templates using AI</p>
           </div>
         </div>
       </div>
 
-      {/* Generation Form */}
-      <div className="bg-white shadow rounded-lg p-6">
-        <h2 className="text-lg font-medium mb-4 flex items-center">
-          <Sparkles className="h-5 w-5 mr-2 text-purple-600" />
-          Generate Sequence Templates
-        </h2>
+      {/* Tabs */}
+      <div className="border-b border-gray-200">
+        <nav className="-mb-px flex space-x-8">
+          <button
+            onClick={() => setActiveTab('existing')}
+            className={`
+              py-4 px-1 border-b-2 font-medium text-sm
+              ${activeTab === 'existing'
+                ? 'border-purple-500 text-purple-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }
+            `}
+          >
+            <div className="flex items-center">
+              <List className="h-5 w-5 mr-2" />
+              Existing Templates ({sequenceTemplates.length})
+            </div>
+          </button>
+          <button
+            onClick={() => setActiveTab('generate')}
+            className={`
+              py-4 px-1 border-b-2 font-medium text-sm
+              ${activeTab === 'generate'
+                ? 'border-purple-500 text-purple-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }
+            `}
+          >
+            <div className="flex items-center">
+              <Plus className="h-5 w-5 mr-2" />
+              Generate New
+            </div>
+          </button>
+        </nav>
+      </div>
+
+      <>
+        {/* Existing Templates Tab */}
+        {activeTab === 'existing' && (
+        <div className="space-y-6">
+          {/* Filters */}
+          <div className="bg-white shadow rounded-lg p-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <Search className="h-4 w-4 inline mr-1" />
+                  Search Templates
+                </label>
+                <input
+                  type="text"
+                  placeholder="Search by content or profile type..."
+                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <Filter className="h-4 w-4 inline mr-1" />
+                  Profile Type
+                </label>
+                <select
+                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500"
+                  value={filterProfileType}
+                  onChange={(e) => setFilterProfileType(e.target.value)}
+                >
+                  <option value="all">All Profile Types</option>
+                  {allProfileTypes.map(type => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <Globe className="h-4 w-4 inline mr-1" />
+                  Language
+                </label>
+                <select
+                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500"
+                  value={filterLanguage}
+                  onChange={(e) => setFilterLanguage(e.target.value)}
+                >
+                  <option value="all">All Languages</option>
+                  {LANGUAGES.map(lang => (
+                    <option key={lang.code} value={lang.code}>{lang.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Templates List */}
+          {filteredTemplates.length === 0 ? (
+            <div className="bg-white shadow rounded-lg p-12 text-center">
+              <List className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">No Templates Found</h3>
+              <p className="text-gray-500 mb-4">
+                {searchQuery || filterProfileType !== 'all' || filterLanguage !== 'all'
+                  ? 'Try adjusting your filters or search query'
+                  : 'Start by generating new templates with AI'
+                }
+              </p>
+              <button
+                onClick={() => setActiveTab('generate')}
+                className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-purple-600 hover:bg-purple-700"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Generate Templates
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {Object.values(groupedTemplates).map(group => (
+                <div key={`${group.profileType}-${group.language}`} className="bg-white shadow rounded-lg overflow-hidden">
+                  <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-lg font-medium text-gray-900">{group.profileType}</h3>
+                        <p className="text-sm text-gray-500">
+                          {LANGUAGES.find(l => l.code === group.language)?.name} • {group.templates.length} message{group.templates.length !== 1 ? 's' : ''}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="divide-y divide-gray-200">
+                    {group.templates.sort((a, b) => a.sequenceOrder - b.sequenceOrder).map((template, idx) => (
+                      <div key={template.id} className="p-6 hover:bg-gray-50">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center mb-2">
+                              <span className="inline-flex items-center justify-center h-6 w-6 rounded-full bg-purple-100 text-purple-800 text-xs font-medium mr-2">
+                                {template.sequenceOrder}
+                              </span>
+                              <span className="text-sm text-gray-500">
+                                Day {template.sequenceDays}
+                              </span>
+                              {template.userId === null && (
+                                <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                  <Globe className="h-3 w-3 mr-1" />
+                                  Global
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-sm text-gray-900 whitespace-pre-wrap">{template.messageTemplate}</p>
+                          </div>
+                          <button
+                            onClick={() => handleDeleteTemplate(template.id)}
+                            className="ml-4 text-red-600 hover:text-red-900"
+                            title="Delete template"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {activeTab === 'generate' && (
+        <div className="space-y-6">
+          {/* Generation Form */}
+          <div className="bg-white shadow rounded-lg p-6">
+            <h2 className="text-lg font-medium mb-4 flex items-center">
+              <Sparkles className="h-5 w-5 mr-2 text-purple-600" />
+              Generate Sequence Templates
+            </h2>
 
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -573,41 +782,44 @@ export function AISequenceTemplateGeneratorPage() {
               </button>
             </div>
           )}
-        </div>
-      )}
 
-      {/* Information Panel */}
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
-        <div className="flex items-start">
-          <Sparkles className="h-6 w-6 text-blue-600 mr-3 mt-1" />
-          <div>
-            <h3 className="text-lg font-medium text-blue-900 mb-2">How AI Sequence Generation Works</h3>
-            <div className="text-sm text-blue-800 space-y-2">
-              <p>
-                Our AI creates WhatsApp-friendly sequence messages tailored to your clinic's needs:
-              </p>
-              <ul className="list-disc list-inside space-y-1 ml-4">
-                <li>Each message follows a structured format: greeting, educational content, and call-to-action</li>
-                <li>Messages are spaced appropriately to avoid overwhelming patients</li>
-                <li>Content is customized based on your theme, profile type, and additional details</li>
-                <li>Templates include placeholders for patient name, clinic name, and contact information</li>
-                <li>You can edit any generated message before saving to your sequence library</li>
-                {canCreateGlobalTemplates && (
-                  <>
-                    <li>As an admin, you can create global templates that are shared with all users</li>
-                    <li>Profile-specific global templates are only visible to users with matching profile types</li>
-                  </>
-                )}
-              </ul>
-              <p className="mt-3">
-                <strong>Tip:</strong> Be specific in your theme and details for better AI-generated content. 
-                For example: "Diabetes management focusing on diet control and regular monitoring" 
-                works better than just "Diabetes".
-              </p>
+          {/* Information Panel */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
+            <div className="flex items-start">
+              <Sparkles className="h-6 w-6 text-blue-600 mr-3 mt-1" />
+              <div>
+                <h3 className="text-lg font-medium text-blue-900 mb-2">How AI Sequence Generation Works</h3>
+                <div className="text-sm text-blue-800 space-y-2">
+                  <p>
+                    Our AI creates WhatsApp-friendly sequence messages tailored to your clinic's needs:
+                  </p>
+                  <ul className="list-disc list-inside space-y-1 ml-4">
+                    <li>Each message follows a structured format: greeting, educational content, and call-to-action</li>
+                    <li>Messages are spaced appropriately to avoid overwhelming patients</li>
+                    <li>Content is customized based on your theme, profile type, and additional details</li>
+                    <li>Templates include placeholders for patient name, clinic name, and contact information</li>
+                    <li>You can edit any generated message before saving to your sequence library</li>
+                    {canCreateGlobalTemplates && (
+                      <>
+                        <li>As an admin, you can create global templates that are shared with all users</li>
+                        <li>Profile-specific global templates are only visible to users with matching profile types</li>
+                      </>
+                    )}
+                  </ul>
+                  <p className="mt-3">
+                    <strong>Tip:</strong> Be specific in your theme and details for better AI-generated content. 
+                    For example: "Diabetes management focusing on diet control and regular monitoring" 
+                    works better than just "Diabetes".
+                  </p>
+                </div>
+              </div>
+            </div>
             </div>
           </div>
+        )}
         </div>
-      </div>
+      )}
+      </>
     </div>
   );
 }
