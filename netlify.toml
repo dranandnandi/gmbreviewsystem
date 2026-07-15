@@ -21,8 +21,8 @@
   included_files = ["netlify/functions/**/*.ts"]
 
 [[headers]]
-  # Define which paths this specific [[headers]] block will cover
-  for = "/*"
+  # Cache generated static assets for 1 year
+  for = "/assets/*"
   
   [headers.values]
     # Security headers
@@ -41,8 +41,23 @@
   [headers.values]
     Cache-Control = "public, max-age=0, must-revalidate"
 
+# CCAvenue payment callback: proxy through our registered domain (limsapp.in)
+# to the Supabase edge function, so CCAvenue only sees the domain its keys are
+# registered for. Must come before the generic /api/* rule (first match wins).
+[[redirects]]
+  from = "/api/ccavenue-callback"
+  to = "https://iksfxkjnslttufpdklgq.supabase.co/functions/v1/ccavenue-callback"
+  status = 200
+  force = true
+
 # Handle form submissions (if you have any contact forms)
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
+  status = 200
+
+# Single-page app fallback for direct route access like /sequence-flow
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
   status = 200

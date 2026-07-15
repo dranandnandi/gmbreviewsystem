@@ -1,13 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../store/useStore';
 import { format, isToday, isPast } from 'date-fns';
-import { Calendar, Clock, Send, AlertCircle, CheckCircle, FileSpreadsheet, RefreshCw, CheckSquare, Square } from 'lucide-react';
+import { Calendar, Clock, Send, AlertCircle, CheckCircle, RefreshCw, CheckSquare, Square } from 'lucide-react';
 import { MessageCard } from '../components/MessageCard';
+import { whatsappApi } from '../services/whatsappApi';
+import { WhatsAppStatusIndicator } from '../components/WhatsApp/WhatsAppStatusIndicator';
 import type { SequenceMessage } from '../types';
 
 export function SimplifiedSequenceMessagesPage() {
-  const { user, sequenceMessages, fetchSequenceMessages, sendMessagesToSheet } = useStore();
+  const { user, sequenceMessages, fetchSequenceMessages, updateSequenceMessageStatus } = useStore();
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isBulkSending, setIsBulkSending] = useState(false);
   const [selectedDueTodayIds, setSelectedDueTodayIds] = useState<Set<string>>(new Set());
   const [selectedOverdueIds, setSelectedOverdueIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string>('');
@@ -75,9 +78,9 @@ export function SimplifiedSequenceMessagesPage() {
     }
   };
 
-  const handleBulkSendToSheet = async (section: 'dueToday' | 'overdue') => {
-    if (!user?.googleSheetId || !user?.googleAppsScriptUrl) {
-      setError('Please configure your Google Sheet ID and Google Apps Script URL in Settings first.');
+  const handleBulkSendViaWhatsApp = async (section: 'dueToday' | 'overdue') => {
+    if (!user?.id) {
+      setError('Please login before sending WhatsApp messages.');
       return;
     }
 
@@ -91,10 +94,42 @@ export function SimplifiedSequenceMessagesPage() {
     
     setError('');
     setSuccess('');
+    setIsBulkSending(true);
 
     try {
-      await sendMessagesToSheet(selectedMessages);
-      setSuccess(`${selectedMessages.length} message${selectedMessages.length > 1 ? 's' : ''} sent to Google Sheet successfully!`);
+      const failedMessages: string[] = [];
+
+      for (const message of selectedMessages) {
+        try {
+          await whatsappApi.sendMessage(
+            {
+              phone: message.whatsappNumber,
+              message: message.messageContent,
+              metadata: {
+                sequenceMessageId: message.id,
+                patientName: message.patientName,
+                scheduledDate: message.scheduledDate,
+                sentFrom: 'QuickSendBulk',
+              },
+            },
+            { userId: user.id }
+          );
+          await updateSequenceMessageStatus(message.id, 'sent');
+        } catch (sendError) {
+          console.error('Error sending WhatsApp sequence message:', sendError);
+          failedMessages.push(message.patientName || message.whatsappNumber);
+        }
+      }
+
+      const sentCount = selectedMessages.length - failedMessages.length;
+
+      if (sentCount > 0) {
+        setSuccess(`${sentCount} message${sentCount > 1 ? 's' : ''} sent via WhatsApp.`);
+      }
+
+      if (failedMessages.length > 0) {
+        setError(`Could not send ${failedMessages.length} message${failedMessages.length > 1 ? 's' : ''}: ${failedMessages.join(', ')}`);
+      }
       
       // Clear selection
       if (section === 'dueToday') {
@@ -106,8 +141,10 @@ export function SimplifiedSequenceMessagesPage() {
       // Clear success message after 3 seconds
       setTimeout(() => setSuccess(''), 3000);
     } catch (error) {
-      console.error('Error sending messages to sheet:', error);
-      setError(error instanceof Error ? error.message : 'Failed to send messages to sheet');
+      console.error('Error sending messages via WhatsApp:', error);
+      setError(error instanceof Error ? error.message : 'Failed to send WhatsApp messages');
+    } finally {
+      setIsBulkSending(false);
     }
   };
 
@@ -235,10 +272,11 @@ export function SimplifiedSequenceMessagesPage() {
           {selectedCount > 0 && (
             <button
               onClick={onBulkSend}
-              className="inline-flex items-center px-3 py-1 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 transition-colors"
+              disabled={isBulkSending}
+              className="inline-flex items-center px-3 py-1 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              <Send className="h-4 w-4 mr-1" />
-              Send to Auto Queue ({selectedCount})
+              {isBulkSending ? <RefreshCw className="h-4 w-4 mr-1 animate-spin" /> : <Send className="h-4 w-4 mr-1" />}
+              Send via WhatsApp ({selectedCount})
             </button>
           )}
         </div>
@@ -264,15 +302,18 @@ export function SimplifiedSequenceMessagesPage() {
             <p className="text-gray-600">Send pending sequence messages</p>
           </div>
         </div>
-        
-        <button
-          onClick={handleRefresh}
-          disabled={isRefreshing}
-          className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
-        >
-          <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
-          {isRefreshing ? 'Refreshing...' : 'Refresh'}
-        </button>
+
+        <div className="flex items-center space-x-3">
+          <WhatsAppStatusIndicator showLabel={true} size="sm" />
+          <button
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+          >
+            <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+            {isRefreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
+        </div>
       </div>
 
       {/* Status Messages */}
@@ -294,26 +335,6 @@ export function SimplifiedSequenceMessagesPage() {
         </div>
       )}
 
-      {/* Configuration Warning */}
-      {(!user?.googleSheetId || !user?.googleAppsScriptUrl) && (
-        <div className="rounded-md bg-yellow-50 p-4">
-          <div className="flex">
-            <AlertCircle className="h-5 w-5 text-yellow-400 mr-2" />
-            <div className="text-sm text-yellow-700">
-              {!user?.googleSheetId && !user?.googleAppsScriptUrl && 
-                'Please configure your Google Sheet ID and Google Apps Script URL in Settings to enable this feature.'
-              }
-              {!user?.googleSheetId && user?.googleAppsScriptUrl && 
-                'Please configure your Google Sheet ID in Settings to enable this feature.'
-              }
-              {user?.googleSheetId && !user?.googleAppsScriptUrl && 
-                'Please configure your Google Apps Script URL in Settings to enable this feature.'
-              }
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Due Today Section */}
       <div className="bg-white rounded-lg shadow">
         <div className="p-6">
@@ -327,7 +348,7 @@ export function SimplifiedSequenceMessagesPage() {
             allSelected={dueTodayAllSelected}
             someSelected={dueTodaySomeSelected}
             onSelectAll={(checked) => handleSelectAll('dueToday', checked)}
-            onBulkSend={() => handleBulkSendToSheet('dueToday')}
+            onBulkSend={() => handleBulkSendViaWhatsApp('dueToday')}
           />
           
           {dueTodayMessages.length === 0 ? (
@@ -364,7 +385,7 @@ export function SimplifiedSequenceMessagesPage() {
             allSelected={overdueAllSelected}
             someSelected={overdueSomeSelected}
             onSelectAll={(checked) => handleSelectAll('overdue', checked)}
-            onBulkSend={() => handleBulkSendToSheet('overdue')}
+            onBulkSend={() => handleBulkSendViaWhatsApp('overdue')}
           />
           
           {overdueMessages.length === 0 ? (

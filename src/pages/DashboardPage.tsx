@@ -148,6 +148,14 @@ export function DashboardPage() {
       feature: 'reviews'
     },
     {
+      name: 'Sequence Flow',
+      description: 'Lead entry, assign sequence, create and send',
+      icon: Clock,
+      color: 'bg-indigo-600 hover:bg-indigo-700',
+      link: '/sequence-flow',
+      feature: 'sequences'
+    },
+    {
       name: 'Quick Send Messages',
       description: 'Send pending sequence messages',
       icon: Send,
@@ -250,7 +258,7 @@ export function DashboardPage() {
             Quick Actions
           </h2>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
           {quickActions.map((action) => (
             <button
               key={action.name}

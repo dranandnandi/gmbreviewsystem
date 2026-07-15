@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useStore } from '../store/useStore';
 import { Shield, Mail, Lock, Eye, EyeOff } from 'lucide-react';
 import { initializeSupabase } from '../services/supabaseClient';
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { login } = useStore();
   const [formData, setFormData] = useState({
     username: '',
@@ -24,7 +25,9 @@ export function LoginPage() {
       // Ensure Supabase is initialized
       await initializeSupabase();
       await login(formData.username, formData.password);
-      navigate('/');
+      // Only allow internal paths as post-login destinations
+      const next = searchParams.get('next');
+      navigate(next && next.startsWith('/') && !next.startsWith('//') ? next : '/');
     } catch (error: any) {
       console.error('Login error:', error);
       if (error.message === 'Failed to fetch' || error.message.includes('network')) {

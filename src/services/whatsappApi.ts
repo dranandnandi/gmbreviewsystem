@@ -51,7 +51,11 @@ export interface SendDocumentRequest {
 export interface SendFileUrlRequest {
   phone: string;
   fileUrl: string;
+  fileName?: string;
+  mimeType?: string;
   caption?: string;
+  patientName?: string;
+  testName?: string;
 }
 
 export interface WhatsAppContext {
@@ -289,13 +293,17 @@ class WhatsAppApiClient {
         phoneWithCode = '91' + phoneWithCode;
       }
 
-      const response = await fetch(`${this.baseUrl}/whatsapp-send-file-url`, {
+      const response = await fetch(`${this.baseUrl}/whatsapp-send-report-url`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           to: phoneWithCode,  // Transform 'phone' to 'to' with country code for backend API
-          fileUrl: request.fileUrl,
+          reportUrl: request.fileUrl,
+          fileName: request.fileName || 'report.pdf',
+          mimeType: request.mimeType || 'application/pdf',
           caption: request.caption,
+          patientName: request.patientName,
+          testName: request.testName,
           ...context,
         }),
       });

@@ -4,6 +4,7 @@ import { MessageCircle, Eye, Edit3, Save, X, CheckCircle, Zap } from 'lucide-rea
 import { useStore } from '../store/useStore';
 import { MessageModal } from './MessageModal';
 import { generateWhatsAppLink } from '../utils/whatsappUtils';
+import { whatsappApi } from '../services/whatsappApi';
 import type { SequenceMessage } from '../types';
 
 interface MessageCardProps {
@@ -26,8 +27,8 @@ export function MessageCard({ message }: MessageCardProps) {
   };
 
   const handleDirectSend = async () => {
-    if (!user?.blueticksApiKey) {
-      setError('Blueticks API key not configured. Please add your API key in Settings first.');
+    if (!user?.id) {
+      setError('Please login before sending WhatsApp messages.');
       return;
     }
 
@@ -36,29 +37,25 @@ export function MessageCard({ message }: MessageCardProps) {
     setSuccess('');
 
     try {
-      const response = await fetch("https://api.blueticks.co/messages", {
-        method: "POST",
-        headers: { 
-          "content-type": "application/json" 
-        },
-        body: JSON.stringify({
-          apiKey: user.blueticksApiKey,
-          to: `+91${message.whatsappNumber}`,
+      await whatsappApi.sendMessage(
+        {
+          phone: message.whatsappNumber,
           message: message.messageContent,
-        }),
-      });
-
-      if (response.ok) {
-        await updateSequenceMessageStatus(message.id, 'sent');
-        setSuccess(`Message sent directly to ${message.patientName}!`);
-        setTimeout(() => setSuccess(''), 3000);
-      } else {
-        const error = await response.text();
-        throw new Error(`Failed to send message: ${error}`);
-      }
+          metadata: {
+            sequenceMessageId: message.id,
+            patientName: message.patientName,
+            scheduledDate: message.scheduledDate,
+            sentFrom: 'MessageCard',
+          },
+        },
+        { userId: user.id }
+      );
+      await updateSequenceMessageStatus(message.id, 'sent');
+      setSuccess(`Message sent to ${message.patientName} via WhatsApp!`);
+      setTimeout(() => setSuccess(''), 3000);
     } catch (error) {
-      console.error('Error sending direct message:', error);
-      setError(error instanceof Error ? error.message : 'Failed to send message directly');
+      console.error('Error sending WhatsApp message:', error);
+      setError(error instanceof Error ? error.message : 'Failed to send WhatsApp message');
     } finally {
       setSendingDirectMessage(false);
     }
@@ -193,9 +190,9 @@ export function MessageCard({ message }: MessageCardProps) {
 
                 <button
                   onClick={handleDirectSend}
-                  disabled={sendingDirectMessage || !user?.blueticksApiKey}
+                  disabled={sendingDirectMessage || !user?.id}
                   className="inline-flex items-center px-3 py-1 border border-transparent text-xs font-medium rounded-md text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  title={!user?.blueticksApiKey ? 'Configure Blueticks API key in Settings first' : 'Send directly via Blueticks API'}
+                  title={!user?.id ? 'Login required' : 'Send directly via connected WhatsApp'}
                 >
                   {sendingDirectMessage ? (
                     <>

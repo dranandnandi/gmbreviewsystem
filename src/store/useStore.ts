@@ -84,7 +84,7 @@ interface Store {
   fetchReviewRequestTemplates: () => Promise<void>;
   updateReviewAiReviewText: (reviewId: string, aiReviewText: string) => Promise<void>;
   updateReviewAiFirstMessageStatus: (reviewId: string, status: boolean) => Promise<void>;
-  addReportRequest: (request: Omit<ReportRequest, 'id' | 'createdAt' | 'updatedAt' | 'status'>) => Promise<void>;
+  addReportRequest: (request: Omit<ReportRequest, 'id' | 'createdAt' | 'updatedAt' | 'status'>) => Promise<ReportRequest | undefined>;
   fetchReportRequests: () => Promise<void>;
   updateReportRequest: (id: string, updates: Partial<ReportRequest>) => Promise<void>;
   sendMessagesToSheet: (messages: SequenceMessage[]) => Promise<void>;
@@ -1097,8 +1097,13 @@ export const useStore = create<Store>()(
               summary_language: request.summaryLanguage,
               status: 'pending',
               uploaded_report_urls: request.uploadedReportUrls,
+              letterhead_url: request.letterheadUrl,
               generated_report_url: request.generatedReportUrl,
+              whatsapp_send_status: request.whatsappSendStatus || 'pending',
+              whatsapp_sent_at: request.whatsappSentAt,
+              whatsapp_send_error: request.whatsappSendError,
               notes: request.notes,
+              biometrics: request.biometrics || null,
               created_at: reportRequest.createdAt,
               updated_at: reportRequest.updatedAt
             }])
@@ -1118,9 +1123,15 @@ export const useStore = create<Store>()(
             summaryLanguage: data.summary_language,
             status: data.status,
             uploadedReportUrls: data.uploaded_report_urls,
+            letterheadUrl: data.letterhead_url,
             generatedReportUrl: data.generated_report_url,
             mergedReportUrl: data.merged_report_url,
+            whatsappSendStatus: data.whatsapp_send_status,
+            whatsappSentAt: data.whatsapp_sent_at,
+            whatsappSendError: data.whatsapp_send_error,
             notes: data.notes,
+            biometrics: data.biometrics,
+            calculatedIndices: data.calculated_indices,
             createdAt: data.created_at,
             updatedAt: data.updated_at
           };
@@ -1128,6 +1139,8 @@ export const useStore = create<Store>()(
           set((state) => ({
             reportRequests: [transformedRequest, ...state.reportRequests]
           }));
+
+          return transformedRequest;
         } catch (error) {
           console.error('Error adding report request:', error);
           throw error;
@@ -1164,9 +1177,15 @@ export const useStore = create<Store>()(
                 summary_language,
                 status,
                 uploaded_report_urls,
+                letterhead_url,
                 generated_report_url,
                 merged_report_url,
+                whatsapp_send_status,
+                whatsapp_sent_at,
+                whatsapp_send_error,
                 notes,
+                biometrics,
+                calculated_indices,
                 created_at,
                 updated_at
               `)
@@ -1194,9 +1213,15 @@ export const useStore = create<Store>()(
             summaryLanguage: request.summary_language,
             status: request.status,
             uploadedReportUrls: request.uploaded_report_urls,
+            letterheadUrl: request.letterhead_url,
             generatedReportUrl: request.generated_report_url,
             mergedReportUrl: request.merged_report_url,
+            whatsappSendStatus: request.whatsapp_send_status,
+            whatsappSentAt: request.whatsapp_sent_at,
+            whatsappSendError: request.whatsapp_send_error,
             notes: request.notes,
+            biometrics: request.biometrics,
+            calculatedIndices: request.calculated_indices,
             createdAt: request.created_at,
             updatedAt: request.updated_at
           }));
@@ -1227,8 +1252,12 @@ export const useStore = create<Store>()(
           if (updates.summaryLanguage !== undefined) dbUpdates.summary_language = updates.summaryLanguage;
           if (updates.status !== undefined) dbUpdates.status = updates.status;
           if (updates.uploadedReportUrls !== undefined) dbUpdates.uploaded_report_urls = updates.uploadedReportUrls;
+          if (updates.letterheadUrl !== undefined) dbUpdates.letterhead_url = updates.letterheadUrl;
           if (updates.generatedReportUrl !== undefined) dbUpdates.generated_report_url = updates.generatedReportUrl;
           if (updates.mergedReportUrl !== undefined) dbUpdates.merged_report_url = updates.mergedReportUrl;
+          if (updates.whatsappSendStatus !== undefined) dbUpdates.whatsapp_send_status = updates.whatsappSendStatus;
+          if (updates.whatsappSentAt !== undefined) dbUpdates.whatsapp_sent_at = updates.whatsappSentAt;
+          if (updates.whatsappSendError !== undefined) dbUpdates.whatsapp_send_error = updates.whatsappSendError;
           if (updates.notes !== undefined) dbUpdates.notes = updates.notes;
           
           // updated_at will be automatically updated by the trigger

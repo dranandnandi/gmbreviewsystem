@@ -80,7 +80,7 @@ export function ProductLandingPage() {
               </p>
               <div className="mt-8 flex flex-col gap-3 sm:flex-row">
                 <Link
-                  to="/login"
+                  to={`/onboarding?product=${product.slug}`}
                   className="inline-flex items-center justify-center rounded-md bg-white px-5 py-3 text-sm font-semibold text-gray-950 shadow-sm hover:bg-gray-100"
                 >
                   Start with {product.shortName}

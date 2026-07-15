@@ -108,6 +108,12 @@ export const PRODUCTS: ProductConfig[] = [
     modules: [
       {
         featureId: 'sequences',
+        label: 'Sequence Flow',
+        path: '/sequence-flow',
+        description: 'Enter leads, assign sequences, create templates, and quick-send due messages from one workspace.',
+      },
+      {
+        featureId: 'sequences',
         label: 'Sequences',
         path: '/sequence-messages',
         description: 'Review scheduled messages and manage sequence status.',

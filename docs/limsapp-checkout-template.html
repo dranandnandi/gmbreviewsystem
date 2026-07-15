@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<!--
+  GUEST CHECKOUT PAGE — drop-in template for the limsapp.in static site
+  =====================================================================
+
+  What this is:
+    A self-contained checkout page (no build tools, no dependencies) that
+    creates the buyer's account and sends them to CCAvenue. On payment
+    success, their plan activates automatically and they land on
+    the app's /payment/result page.
+
+  How to use on the limsapp.in Netlify site:
+    1. Copy this file into the limsapp.in site, e.g. as
+         checkout-smart-reports.html
+       (one copy per product; change PLAN_ID in the CONFIG block below)
+    2. Fill in the CONFIG block: SUPABASE_URL and SUPABASE_ANON_KEY.
+       The anon key is the PUBLIC key (same one the main app ships to
+       browsers) — NOT the service role key. Never put any other key here.
+    3. Add this proxy rule to the limsapp.in site's netlify.toml so the
+       CCAvenue callback stays on the registered domain:
+
+         [[redirects]]
+           from = "/api/ccavenue-callback"
+           to = "https://iksfxkjnslttufpdklgq.supabase.co/functions/v1/ccavenue-callback"
+           status = 200
+           force = true
+
+    4. In Supabase edge function secrets, while running on limsapp.in keys:
+         CCAVENUE_ACCESS_CODE / CCAVENUE_WORKING_KEY = the limsapp.in pair
+         CCAVENUE_REDIRECT_URL = https://limsapp.in/api/ccavenue-callback
+         CCAVENUE_CANCEL_URL   = https://limsapp.in/api/ccavenue-callback
+    5. Link your landing page's "Buy now" button to this page.
+
+  PLAN_ID values: review_booster | appointment_reminder | sequence_sender
+                  | smart_reports | clinic_growth_suite
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Checkout</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; background: #f9fafb; color: #111827; padding: 40px 16px; }
+    .card { max-width: 460px; margin: 0 auto; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 28px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+    h1 { font-size: 20px; margin-bottom: 4px; }
+    .sub { color: #6b7280; font-size: 14px; margin-bottom: 20px; }
+    .price-row { display: flex; align-items: baseline; gap: 6px; margin: 16px 0; }
+    .price { font-size: 30px; font-weight: 700; }
+    .cycle { color: #6b7280; font-size: 14px; }
+    .toggle { display: flex; border: 1px solid #e5e7eb; border-radius: 8px; padding: 3px; margin-bottom: 8px; }
+    .toggle button { flex: 1; border: 0; background: transparent; padding: 8px; border-radius: 6px; font-size: 14px; cursor: pointer; color: #4b5563; }
+    .toggle button.active { background: #4f46e5; color: #fff; }
+    label { display: block; font-size: 13px; font-weight: 600; margin: 14px 0 4px; }
+    input { width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 10px 12px; font-size: 14px; }
+    input:focus { outline: 2px solid #4f46e5; border-color: #4f46e5; }
+    .hint { font-size: 12px; color: #9ca3af; margin-top: 4px; }
+    .error { display: none; background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-top: 14px; }
+    .pay-btn { width: 100%; margin-top: 20px; background: #4f46e5; color: #fff; border: 0; border-radius: 8px; padding: 13px; font-size: 15px; font-weight: 600; cursor: pointer; }
+    .pay-btn:disabled { background: #a5b4fc; cursor: not-allowed; }
+    .secure { text-align: center; font-size: 12px; color: #9ca3af; margin-top: 14px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1 id="plan-name">Loading…</h1>
+    <p class="sub">Create your account & activate instantly after payment</p>
+
+    <div class="toggle" id="cycle-toggle" style="display:none">
+      <button type="button" data-cycle="monthly" class="active">Monthly</button>
+      <button type="button" data-cycle="yearly">Yearly</button>
+    </div>
+    <div class="price-row">
+      <span class="price" id="price">—</span>
+      <span class="cycle" id="cycle-label">/month</span>
+    </div>
+
+    <form id="checkout-form">
+      <label>Business / Clinic Name *</label>
+      <input name="business_name" required placeholder="e.g. City Care Clinic" />
+      <label>Your Name *</label>
+      <input name="admin_name" required placeholder="Full name" />
+      <label>Email *</label>
+      <input name="email" type="email" required placeholder="you@business.com" />
+      <label>Phone *</label>
+      <input name="phone" type="tel" required placeholder="10-digit mobile" />
+      <label>Set a Password *</label>
+      <input name="password" type="password" required placeholder="Min 8 chars: A-z, 0-9, symbol" />
+      <p class="hint">You'll log in with this email & password after payment.</p>
+
+      <div class="error" id="error-box"></div>
+
+      <button type="submit" class="pay-btn" id="pay-btn">Pay & Activate</button>
+      <p class="secure">🔒 Secure payment via CCAvenue — cards, UPI, net banking</p>
+    </form>
+  </div>
+
+  <script>
+    // ============ CONFIG — fill these in ============
+    var CONFIG = {
+      // These two are PUBLIC client values (same ones the main app ships to every browser)
+      SUPABASE_URL: 'https://iksfxkjnslttufpdklgq.supabase.co',
+      SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlrc2Z4a2puc2x0dHVmcGRrbGdxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzg0NDA0NDAsImV4cCI6MjA1NDAxNjQ0MH0.Mlf365IfIPTGRcGjoo87d2iDPUNCCwfCIX6Swhc0cLY',
+      // Change per product page: review_booster | appointment_reminder |
+      // sequence_sender | smart_reports | clinic_growth_suite
+      PLAN_ID: 'smart_reports'
+    };
+    // ================================================
+
+    var state = { cycle: 'monthly', plan: null };
+
+    function fmt(n, currency) {
+      return new Intl.NumberFormat('en-IN', { style: 'currency', currency: currency || 'INR', maximumFractionDigits: 0 }).format(n);
+    }
+
+    function renderPrice() {
+      if (!state.plan) return;
+      var p = state.cycle === 'yearly' && state.plan.yearly_price ? state.plan.yearly_price : state.plan.monthly_price;
+      document.getElementById('price').textContent = fmt(p, state.plan.currency);
+      document.getElementById('cycle-label').textContent = state.cycle === 'yearly' ? '/year' : '/month';
+      document.getElementById('pay-btn').textContent = 'Pay ' + fmt(p, state.plan.currency) + ' & Activate';
+    }
+
+    function showError(msg) {
+      var box = document.getElementById('error-box');
+      box.textContent = msg;
+      box.style.display = 'block';
+    }
+
+    // Load plan details (uses the public anon key; only active plans are readable)
+    fetch(CONFIG.SUPABASE_URL + '/rest/v1/saas_plans?id=eq.' + CONFIG.PLAN_ID + '&is_active=eq.true&select=id,name,monthly_price,yearly_price,currency', {
+      headers: { apikey: CONFIG.SUPABASE_ANON_KEY, Authorization: 'Bearer ' + CONFIG.SUPABASE_ANON_KEY }
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (rows) {
+        if (!rows || !rows.length) { showError('This plan is currently unavailable.'); return; }
+        state.plan = rows[0];
+        document.getElementById('plan-name').textContent = state.plan.name;
+        var monthlyAvailable = Number(state.plan.monthly_price) > 0;
+        var yearlyAvailable = Number(state.plan.yearly_price) > 0;
+        if (!monthlyAvailable && yearlyAvailable) {
+          // Yearly-only plan
+          state.cycle = 'yearly';
+        } else if (monthlyAvailable && yearlyAvailable) {
+          document.getElementById('cycle-toggle').style.display = 'flex';
+        }
+        renderPrice();
+      })
+      .catch(function () { showError('Could not load plan. Please refresh.'); });
+
+    document.getElementById('cycle-toggle').addEventListener('click', function (e) {
+      var btn = e.target.closest('button');
+      if (!btn) return;
+      state.cycle = btn.getAttribute('data-cycle');
+      this.querySelectorAll('button').forEach(function (b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      renderPrice();
+    });
+
+    document.getElementById('checkout-form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      document.getElementById('error-box').style.display = 'none';
+      var payBtn = document.getElementById('pay-btn');
+      payBtn.disabled = true;
+      payBtn.textContent = 'Preparing secure payment…';
+
+      var fd = new FormData(this);
+      var body = {
+        plan_id: CONFIG.PLAN_ID,
+        billing_cycle: state.cycle,
+        business_name: fd.get('business_name'),
+        admin_name: fd.get('admin_name'),
+        email: fd.get('email'),
+        phone: fd.get('phone'),
+        password: fd.get('password')
+      };
+
+      fetch(CONFIG.SUPABASE_URL + '/functions/v1/ccavenue-guest-checkout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: CONFIG.SUPABASE_ANON_KEY,
+          Authorization: 'Bearer ' + CONFIG.SUPABASE_ANON_KEY
+        },
+        body: JSON.stringify(body)
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (res) {
+          if (!res.success || !res.encrypted_data) {
+            throw new Error(res.error || 'Failed to start payment');
+          }
+          // CCAvenue requires a POST form submit
+          var form = document.createElement('form');
+          form.method = 'POST';
+          form.action = res.payment_url;
+          [['encRequest', res.encrypted_data], ['access_code', res.access_code]].forEach(function (pair) {
+            var input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = pair[0];
+            input.value = pair[1];
+            form.appendChild(input);
+          });
+          document.body.appendChild(form);
+          form.submit();
+        })
+        .catch(function (err) {
+          showError(err.message || 'Something went wrong. Please try again.');
+          payBtn.disabled = false;
+          renderPrice();
+        });
+    });
+  </script>
+</body>
+</html>

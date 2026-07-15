@@ -2,9 +2,27 @@ type PublicUserRecord = {
   id?: string;
   auth_id?: string | null;
   username?: string | null;
+  password_hash?: string | null;
   contact_email?: string | null;
+  contact_phone?: string | null;
+  contact_whatsapp?: string | null;
   name?: string | null;
   role?: string | null;
+  clinic_name?: string | null;
+  clinic_address?: string | null;
+  gmb_link?: string | null;
+  logo?: string | null;
+  primary_color?: string | null;
+  secondary_color?: string | null;
+  languages?: unknown;
+  default_language?: string | null;
+  google_sheet_id?: string | null;
+  google_apps_script_url?: string | null;
+  enabled_features?: unknown;
+  blueticks_api_key?: string | null;
+  profile_types?: unknown;
+  clinic_keywords?: string | null;
+  business_context?: unknown;
 };
 
 type DatabaseWebhookPayload = {
@@ -61,6 +79,8 @@ Deno.serve(async (req: Request) => {
       record.username?.trim() ||
       record.contact_email?.trim() ||
       record.id;
+    const clinicName = record.clinic_name?.trim() || fullName;
+    const contactEmail = record.contact_email?.trim() || username;
 
     // The application uses public.users.id for every WhatsApp backend request.
     const backendPayload = {
@@ -68,10 +88,44 @@ Deno.serve(async (req: Request) => {
       id: record.id,
       auth_id: record.auth_id || record.id,
       username,
-      email: record.contact_email || username,
+      email: contactEmail,
       fullName,
       name: fullName,
       role: record.role || 'admin',
+      clinicName,
+      clinic_name: clinicName,
+      clinicAddress: record.clinic_address || '',
+      clinic_address: record.clinic_address || '',
+      gmbLink: record.gmb_link || '',
+      gmb_link: record.gmb_link || '',
+      logo: record.logo || '',
+      primaryColor: record.primary_color || '#4F46E5',
+      primary_color: record.primary_color || '#4F46E5',
+      secondaryColor: record.secondary_color || '#E5E7EB',
+      secondary_color: record.secondary_color || '#E5E7EB',
+      contactPhone: record.contact_phone || '',
+      contact_phone: record.contact_phone || '',
+      contactEmail,
+      contact_email: contactEmail,
+      contactWhatsapp: record.contact_whatsapp || record.contact_phone || '',
+      contact_whatsapp: record.contact_whatsapp || record.contact_phone || '',
+      languages: record.languages || null,
+      defaultLanguage: record.default_language || 'en',
+      default_language: record.default_language || 'en',
+      enabledFeatures: record.enabled_features || [],
+      enabled_features: record.enabled_features || [],
+      profileTypes: record.profile_types || [],
+      profile_types: record.profile_types || [],
+      googleSheetId: record.google_sheet_id || '',
+      google_sheet_id: record.google_sheet_id || '',
+      googleAppsScriptUrl: record.google_apps_script_url || '',
+      google_apps_script_url: record.google_apps_script_url || '',
+      blueticksApiKey: record.blueticks_api_key || '',
+      blueticks_api_key: record.blueticks_api_key || '',
+      clinicKeywords: record.clinic_keywords || '',
+      clinic_keywords: record.clinic_keywords || '',
+      businessContext: record.business_context || null,
+      business_context: record.business_context || null,
     };
 
     const backendUrl = Deno.env.get('WHATSAPP_USER_SYNC_URL') || DEFAULT_BACKEND_URL;
@@ -87,6 +141,10 @@ Deno.serve(async (req: Request) => {
     console.log('Syncing public user to WhatsApp backend', {
       userId: record.id,
       username,
+      clinicName,
+      hasContactPhone: Boolean(record.contact_phone),
+      hasContactWhatsapp: Boolean(record.contact_whatsapp),
+      hasBackendSecret: Boolean(backendSecret),
     });
 
     const response = await fetch(backendUrl, {

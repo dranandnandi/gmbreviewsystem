@@ -35,7 +35,7 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({ 
     }
   }, [user?.id]);
 
-  const checkStatus = async () => {
+  const checkStatus = async (options: { silent?: boolean } = {}) => {
     if (!user?.id) {
       setStatus('disconnected');
       setError('No user ID found');
@@ -43,7 +43,9 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({ 
     }
 
     try {
-      setStatus('loading');
+      if (!options.silent && !qrCodeImage) {
+        setStatus('loading');
+      }
       setError(null);
       console.log('[WhatsApp] Calling getStatus with userId:', user.id);
       const response = await whatsappApi.getStatus({ userId: user.id });

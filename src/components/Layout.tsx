@@ -15,6 +15,7 @@ const allNavItems = [
   { path: '/products', icon: Boxes, label: 'Products' },
   { path: '/appointments', icon: Home, label: 'Appointments', feature: 'appointments' },
   { path: '/reviews', icon: MessageSquare, label: 'Reviews', feature: 'reviews' },
+  { path: '/sequence-flow', icon: Send, label: 'Sequence Flow', feature: 'sequences' },
   { path: '/sequence-messages', icon: Clock, label: 'Sequences', feature: 'sequences' },
   { path: '/quick-send', icon: Send, label: 'Quick Send', feature: 'sequences' },
   { path: '/ai-sequence-generator', icon: Wand2, label: 'AI Generator', feature: 'sequences' },
@@ -31,14 +32,21 @@ export function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
+  const enabledProductFeatures = (user?.enabledFeatures || []).filter((feature) => feature !== 'dashboard');
+  const isSingleProductAccount = !isSuperAdminRole(user?.role) && enabledProductFeatures.length === 1;
 
   // Filter navigation items based on user features and role
   const navItems = allNavItems.filter(item => {
-    // Always show dashboard and settings
+    if (isSingleProductAccount) {
+      if (item.feature) return hasFeature(user, item.feature);
+      return item.path === '/settings';
+    }
+
+    // Always show dashboard, products, clinic info, and settings for suite accounts
     if (!item.feature && !item.adminOnly && !item.superAdminOnly) return true;
     
     // Show admin panel for admin and super admin users
-    if (item.adminOnly) return isAdminRole(user?.role);
+    if (item.adminOnly) return isAdminRole(user?.role) && !isSingleProductAccount;
 
     // Show super admin panel only for platform operators
     if (item.superAdminOnly) return isSuperAdminRole(user?.role);

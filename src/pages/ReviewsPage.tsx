@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useStore } from '../store/useStore';
 import { format, addDays } from 'date-fns';
 import { generateReviewMessageContent } from '../utils/messageGeneration';
-import { MessageCircle, Clock, Pencil } from 'lucide-react';
+import { MessageCircle, Clock, Pencil, Star } from 'lucide-react';
 import { SequenceOptionsModal } from '../components/SequenceOptionsModal';
 import { BulkCreateSequenceModal } from '../components/BulkCreateSequenceModal';
 import { InteractiveStatusBadge } from '../components/InteractiveStatusBadge';
@@ -14,6 +14,7 @@ import { getRandomizedSequenceDays } from '../utils/dateUtils';
 import { toTitleCase } from '../utils/stringUtils';
 import { CheckSquare, Square } from 'lucide-react';
 import { EditReviewModal } from '../components/EditReviewModal';
+import { WhatsAppStatusIndicator } from '../components/WhatsApp/WhatsAppStatusIndicator';
 
 const LANGUAGE_NAMES: Record<string, string> = {
   en: 'English',
@@ -698,6 +699,18 @@ export function ReviewsPage() {
 
   return (
     <div className="space-y-6">
+      {/* Page Header with WhatsApp Status */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center">
+          <Star className="h-8 w-8 text-green-600 mr-3" />
+          <div>
+            <h1 className="text-2xl font-semibold text-gray-900">Review Requests</h1>
+            <p className="text-gray-600">Create AI-powered review requests and send to patients</p>
+          </div>
+        </div>
+        <WhatsAppStatusIndicator showLabel={true} size="sm" />
+      </div>
+
       <div className="bg-white shadow rounded-lg p-6">
         <h2 className="text-lg font-medium mb-4">New Review Request</h2>
         

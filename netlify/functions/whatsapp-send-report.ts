@@ -6,7 +6,6 @@
 
 import { Handler } from '@netlify/functions';
 import { forwardToWhatsApp, parseRequestBody, error, corsHeaders } from './_shared/whatsappClient';
-import { getUserIdFromAuthId } from './_shared/userLookup';
 
 export const handler: Handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
@@ -25,15 +24,10 @@ export const handler: Handler = async (event) => {
       return error('Missing required fields: userId, to, reportBase64, fileName, mimeType', 400);
     }
 
-    // Look up backend user ID
-    const backendUserId = await getUserIdFromAuthId(authId);
-    if (!backendUserId) {
-      return error('User not found in WhatsApp backend', 404);
-    }
-
-    // Forward to backend
+    // Keep this aligned with whatsapp-send-message: the WhatsApp backend uses
+    // the app userId directly for per-user sessions.
     const response = await forwardToWhatsApp(
-      `/api/users/${backendUserId}/whatsapp/send-report`,
+      `/api/users/${authId}/whatsapp/send-report`,
       'POST',
       { to, reportBase64, fileName, mimeType, caption }
     );

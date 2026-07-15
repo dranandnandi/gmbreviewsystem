@@ -3,6 +3,7 @@ export type ProfileType = string; // Now allows any custom profile type
 export type SequenceMessageStatus = 'pending' | 'sent' | 'failed';
 export type ReportType = 'smart_report' | 'trend_analysis' | 'longitivity_report';
 export type ReportStatus = 'pending' | 'processing' | 'completed' | 'failed';
+export type ReportWhatsAppSendStatus = 'pending' | 'sent' | 'failed';
 
 export interface BusinessContext {
   businessType?: string;
@@ -149,6 +150,81 @@ export interface ReviewRequestTemplate {
   updatedAt: string;
 }
 
+// Biometrics for clinical calculations (especially longevity reports)
+export type SmokingStatus = 'never' | 'former' | 'current';
+export type AlcoholConsumption = 'never' | 'occasional' | 'regular';
+
+export interface PatientBiometrics {
+  anthropometry?: {
+    height_cm?: number;
+    weight_kg?: number;
+  };
+  vital_signs?: {
+    systolic_bp?: number;
+    diastolic_bp?: number;
+    pulse_rate?: number;
+  };
+  lifestyle?: {
+    smoking_status?: SmokingStatus;
+    smokeless_tobacco?: SmokingStatus;
+    alcohol_consumption?: AlcoholConsumption;
+  };
+  medical_history?: {
+    diabetes?: boolean;
+    hypertension?: boolean;
+    dyslipidemia?: boolean;
+    thyroid_disorder?: boolean;
+    heart_disease?: boolean;
+    kidney_disease?: boolean;
+  };
+  family_history?: {
+    diabetes?: boolean;
+    heart_disease?: boolean;
+    hypertension?: boolean;
+    stroke?: boolean;
+    cancer?: boolean;
+  };
+}
+
+// Individual clinical indices calculated from lab values + biometrics
+export interface CalculatedIndex {
+  name: string;
+  value: number | string;
+  unit?: string;
+  interpretation?: string;
+  category: string;
+  status?: 'optimal' | 'borderline' | 'elevated' | 'low' | 'high' | 'normal' | 'not_calculated';
+  reference_range?: string;
+}
+
+// Composite health scores for longevity reports
+export interface CompositeScore {
+  name: string;
+  score: number; // 0-100
+  grade: 'A' | 'B' | 'C' | 'D' | 'F' | 'N/A';
+  interpretation: string;
+  factors_used: string[];
+  factors_missing: string[];
+  recommendations?: string[];
+}
+
+export interface CalculatedIndices {
+  individual_indices: CalculatedIndex[];
+  not_calculated_indices?: CalculatedIndex[];
+  composite_scores: CompositeScore[];
+  biological_age_estimate?: {
+    estimated_age: number;
+    chronological_age: number;
+    age_difference: number;
+    interpretation: string;
+  };
+  longevity_score?: {
+    score: number;
+    percentile?: number;
+    interpretation: string;
+  };
+}
+
 export interface ReportRequest {
   id: string;
   userId: string;
@@ -159,9 +235,15 @@ export interface ReportRequest {
   summaryLanguage?: string;
   status: ReportStatus;
   uploadedReportUrls?: string[];
+  letterheadUrl?: string;
   generatedReportUrl?: string;
   mergedReportUrl?: string;
+  whatsappSendStatus?: ReportWhatsAppSendStatus;
+  whatsappSentAt?: string;
+  whatsappSendError?: string;
   notes?: string;
+  biometrics?: PatientBiometrics;
+  calculatedIndices?: CalculatedIndices;
   createdAt: string;
   updatedAt: string;
 }
@@ -263,4 +345,86 @@ export interface GenerateSequenceParams {
   profileType: string;
   clinicName: string;
   clinicPhone: string;
+}
+
+// Payment & Subscription Types
+export type BillingCycle = 'monthly' | 'yearly';
+export type PaymentOrderStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'expired';
+export type PaymentTransactionStatus = 'Success' | 'Failure' | 'Aborted' | 'Invalid';
+export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'paused' | 'cancelled';
+
+export interface SaasPlan {
+  id: string;
+  name: string;
+  description: string | null;
+  monthlyPrice: number;
+  yearlyPrice: number | null;
+  currency: string;
+  isActive: boolean;
+  sortOrder: number;
+  metadata: Record<string, unknown>;
+}
+
+export interface SaasPlanFeature {
+  id: string;
+  planId: string;
+  featureId: string;
+  limits: Record<string, unknown>;
+}
+
+export interface UserSubscription {
+  id: string;
+  userId: string;
+  planId: string | null;
+  status: SubscriptionStatus;
+  billingProvider: string | null;
+  providerCustomerId: string | null;
+  providerSubscriptionId: string | null;
+  currentPeriodStart: string | null;
+  currentPeriodEnd: string | null;
+  trialEndsAt: string | null;
+  cancelAtPeriodEnd: boolean;
+  enabledFeatureOverrides: string[] | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PaymentOrder {
+  id: string;
+  userId: string;
+  planId: string;
+  billingCycle: BillingCycle;
+  amount: number;
+  currency: string;
+  status: PaymentOrderStatus;
+  ccavenueOrderId: string | null;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface PaymentInitiateRequest {
+  plan_id: string;
+  billing_cycle: BillingCycle;
+  billing_name?: string;
+  billing_email?: string;
+  billing_tel?: string;
+  billing_address?: string;
+  billing_city?: string;
+  billing_state?: string;
+  billing_zip?: string;
+  billing_country?: string;
+}
+
+export interface PaymentInitiateResponse {
+  success: boolean;
+  order_id?: string;
+  ccavenue_order_id?: string;
+  encrypted_data?: string;
+  access_code?: string;
+  payment_url?: string;
+  amount?: number;
+  currency?: string;
+  plan_name?: string;
+  error?: string;
 }
